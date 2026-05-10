@@ -14,14 +14,28 @@ import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged }
 import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 
 // --- Firebase Initialization ---
-const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID
-};
+let firebaseConfig;
+if (typeof __firebase_config !== 'undefined') {
+  // Mode Canvas / Sandbox
+  firebaseConfig = JSON.parse(__firebase_config);
+} else {
+  // Mode Vercel / GitHub / Local
+  // PERHATIAN: Saat memindahkan kode ini ke lokal (Vite), ganti string kosong ("") 
+  // di bawah dengan: import.meta.env.VITE_FIREBASE_API_KEY dst.
+  firebaseConfig = {
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    appId: import.meta.env.VITE_FIREBASE_APP_ID
+  };
+}
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'swim-meet-pro-cloud';
 
 const App = () => {
   // --- Auth & User State ---
@@ -642,7 +656,9 @@ const App = () => {
           aoa.push(row);
         });
         const customCols = includePoints ? [{wch: 8}, {wch: 35}, {wch: 6}, {wch: 30}, {wch: 15}, {wch: 15}, {wch: 8}] : [{wch: 8}, {wch: 35}, {wch: 6}, {wch: 30}, {wch: 15}, {wch: 15}];
-        exportToXLSX(aoa, `${modeSuffix}_Event_${eIdx + 1}_${activeEvent.name.replace(/\s+/g, '_')}`, "Results", customCols);
+        const ws = XLSX.utils.aoa_to_sheet(aoa);
+        ws['!cols'] = customCols;
+        const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, "Results"); XLSX.writeFile(wb, `${modeSuffix}_Event_${eIdx + 1}_${activeEvent.name.replace(/\s+/g, '_')}.xlsx`);
         showDialog("Sukses", `Excel ${modeSuffix} berhasil dibuat dan diunduh!`, "success");
       } catch (err) { showDialog("Error", "Gagal men-generate Excel.", "error"); } finally { setIsImportingSwimmers(false); setImportProgress(''); }
       return;
@@ -1367,7 +1383,7 @@ const App = () => {
                    <span className="text-[10px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded font-black uppercase border border-indigo-100 mt-1 inline-block">[{t.abbr}]</span>
                  </div>
                </div>
-               <button onClick={() => deleteTeam(t.id)} className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"><Trash2 size={18}/></button>
+               <button onClick={() => deleteTeamFromMeet(t.id)} className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"><Trash2 size={18}/></button>
             </div>
           ))}
         </div>
@@ -2260,18 +2276,45 @@ const App = () => {
         <div className="absolute top-0 left-0 w-full h-64 bg-slate-900 -z-10 rounded-b-[4rem]"></div>
         
         {activeMeetId === null ? (
-           superView === 'main_db' ? renderMainDatabase() : renderSuperuserDashboard()
+           <div className="max-w-6xl mx-auto space-y-10 pb-20 animate-in fade-in">
+             <div className="flex justify-between items-end mb-6">
+                <h2 className="text-2xl font-black text-white tracking-tight flex items-center gap-2"><Cloud className="text-blue-500"/> Kejuaraan Online</h2>
+                <button onClick={() => setShowNewMeetModal(true)} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-3 rounded-xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition flex items-center gap-2"><Plus size={16}/> Buat Baru</button>
+             </div>
+             
+             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                <div className="grid grid-cols-12 bg-slate-50 p-5 border-b border-slate-200 text-xs font-black uppercase text-slate-400 tracking-widest">
+                  <div className="col-span-8">Nama Kejuaraan</div><div className="col-span-4 text-right">Aksi</div>
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {meets.map(meet => (
+                    <div key={meet.id} className="grid grid-cols-12 p-5 items-center hover:bg-slate-50 transition group">
+                      <div className="col-span-8">
+                        <h3 className="font-black text-lg text-slate-800 uppercase">{meet.meetInfo.name}</h3>
+                        <div className="text-[10px] text-slate-400 font-bold mt-1 uppercase flex items-center gap-2"><span>ID: {meet.id}</span><span className="bg-slate-100 px-2 py-0.5 rounded text-slate-600">PIN: {meet.adminPin}</span></div>
+                      </div>
+                      <div className="col-span-4 flex justify-end gap-3">
+                        <button onClick={() => deleteMeet(meet.id)} className="text-red-300 hover:text-red-600 p-2 transition"><Trash2 size={18}/></button>
+                        <button onClick={() => { setActiveMeetId(meet.id); setActiveTab('dashboard'); }} className="bg-blue-600 text-white font-black text-xs uppercase px-5 py-2.5 rounded-xl shadow-lg hover:bg-blue-700 transition active:scale-95">Buka Lomba</button>
+                      </div>
+                    </div>
+                  ))}
+                  {meets.length === 0 && <div className="p-20 text-center text-slate-300 font-black uppercase tracking-widest">Belum ada lomba di Cloud</div>}
+                </div>
+             </div>
+           </div>
         ) : (
-          <>
-            {activeTab === 'dashboard' && renderDashboard()}
-            {activeTab === 'master-setup' && renderMasterSetup()}
-            {activeTab === 'teams' && renderTeams()}
-            {activeTab === 'athletes' && renderAthletes()}
-            {activeTab === 'entries' && renderEntries()}
-            {activeTab === 'seeding' && renderSeedingModule()}
-            {activeTab === 'admin-panel' && renderAdminPanel()}
-            {activeTab === 'leaderboard' && renderLeaderboard()}
-          </>
+          <div className="p-6 bg-white rounded-3xl shadow-xl min-h-[400px]">
+             {/* Konten akan menyesuaikan dengan tab yang dipilih */}
+             {activeTab === 'dashboard' && renderDashboard()}
+             {activeTab === 'master-setup' && renderMasterSetup()}
+             {activeTab === 'teams' && renderTeams()}
+             {activeTab === 'athletes' && renderAthletes()}
+             {activeTab === 'entries' && renderEntries()}
+             {activeTab === 'seeding' && renderSeedingModule()}
+             {activeTab === 'admin-panel' && renderAdminPanel()}
+             {activeTab === 'leaderboard' && renderLeaderboard()}
+          </div>
         )}
       </div>
       
