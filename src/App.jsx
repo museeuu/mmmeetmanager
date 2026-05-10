@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { 
-  Trophy, Users, ClipboardList, BookOpen, Lock, Settings, 
-  Plus, Trash2, Edit3, Save, Download, Upload, CheckCircle, 
-  XCircle, Filter, ChevronRight, UserCheck, Shield, Database,
+  Trophy, Users, Lock, Settings, 
+  Plus, Trash2, Edit3, Download, CheckCircle, 
+  XCircle, ChevronRight, UserCheck, Database,
   Search, List, Layout, Clock, AlertCircle, FileText, BarChart3, Move, UserCog,
   Share2, PlayCircle, LogOut, ArrowLeft, UploadCloud, Medal, Star, Crown, Flag,
   Award, FileImage, Cloud, Loader2
@@ -20,8 +20,8 @@ if (typeof __firebase_config !== 'undefined') {
   firebaseConfig = JSON.parse(__firebase_config);
 } else {
   // Mode Vercel / GitHub / Local
-  // PERHATIAN: Saat memindahkan kode ini ke lokal (Vite), ganti string kosong ("") 
-  // di bawah dengan: import.meta.env.VITE_FIREBASE_API_KEY dst.
+  // PERHATIAN: Saat memindahkan kode ini ke komputer Anda (Vite / VS Code), 
+  // ganti string kosong ("") di bawah ini dengan: import.meta.env.VITE_FIREBASE_API_KEY dst.
   firebaseConfig = {
     apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
     authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -42,7 +42,7 @@ const App = () => {
   const [user, setUser] = useState(null);
   const [role, setRole] = useState(null); 
   const [passwordInput, setPasswordInput] = useState('');
-  const [masterPassword, setMasterPassword] = useState('123456');
+  const [masterPassword] = useState('123456');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [superView, setSuperView] = useState('meets'); 
   
@@ -54,7 +54,6 @@ const App = () => {
   const [activeMeetId, setActiveMeetId] = useState(null);
   const [showNewMeetModal, setShowNewMeetModal] = useState(false);
   const [showChangePinModal, setShowChangePinModal] = useState(false);
-  const [newPinInput, setNewPinInput] = useState('');
   const [newMeetForm, setNewMeetForm] = useState({ name: '', date: '', location: '', adminPin: '' });
 
   // --- Centralized Custom Dialog State ---
@@ -104,9 +103,8 @@ const App = () => {
   // --- UI States for Active Meet ---
   const [activeTab, setActiveTab] = useState('dashboard');
   const [editingEntry, setEditingEntry] = useState(null);
-  const [leaderboardMode, setLeaderboardMode] = useState('standard'); 
+  const [leaderboardMode] = useState('standard'); 
   const [reportTab, setReportTab] = useState('points');
-  const [pointModal, setPointModal] = useState(null); 
   const [runEventId, setRunEventId] = useState(null);
   const [runHeat, setRunHeat] = useState(1);
   const [isImporting, setIsImporting] = useState(false); 
@@ -220,7 +218,6 @@ const App = () => {
   const [newKU, setNewKU] = useState({ name: '', minAge: '', maxAge: '' });
   const fileInputRef = useRef(null); 
   const swimmerFileInputRef = useRef(null);
-  const certFileInputRef = useRef(null);
 
   const addAgeGroup = () => {
     if(!newKU.name || !newKU.minAge || !newKU.maxAge) return;
@@ -1294,13 +1291,13 @@ const App = () => {
               <div className="flex flex-col gap-4">
                 <button onClick={() => {
                   if (hasResults) {
-                    showDialog('Hak Veto Master', 'Perlombaan sudah berjalan.\n\nKarena Anda login sebagai Master, Anda diizinkan untuk mengubah sistem poin.\n\nSETELAH MENGUBAH POIN, Anda WAJIB menekan tombol "Re-Score" pada setiap event di Run Screen agar poin baru diterapkan!', 'warning', () => setPointModal('standard'));
-                  } else { setPointModal('standard'); }
+                    showDialog('Hak Veto Master', 'Perlombaan sudah berjalan.\n\nKarena Anda login sebagai Master, Anda diizinkan untuk mengubah sistem poin.\n\nSETELAH MENGUBAH POIN, Anda WAJIB menekan tombol "Re-Score" pada setiap event di Run Screen agar poin baru diterapkan!', 'warning', () => showDialog('Segera Hadir', 'Fitur editor poin sedang dalam pengembangan.'));
+                  } else { showDialog('Segera Hadir', 'Fitur editor poin sedang dalam pengembangan.'); }
                 }} className="w-full p-4 bg-white border-2 border-indigo-100 text-indigo-700 rounded-2xl font-black uppercase tracking-widest hover:border-indigo-400 hover:bg-indigo-50 transition shadow-sm flex items-center justify-center gap-3"><Edit3 size={18}/> Set Poin Standar</button>
                 <button onClick={() => {
                   if (hasResults) {
-                    showDialog('Hak Veto Master', 'Perlombaan sudah berjalan.\n\nKarena Anda login sebagai Master, Anda diizinkan untuk mengubah sistem poin.\n\nSETELAH MENGUBAH POIN, Anda WAJIB menekan tombol "Re-Score" pada setiap event di Run Screen agar poin baru diterapkan!', 'warning', () => setPointModal('alternative'));
-                  } else { setPointModal('alternative'); }
+                    showDialog('Hak Veto Master', 'Perlombaan sudah berjalan.\n\nKarena Anda login sebagai Master, Anda diizinkan untuk mengubah sistem poin.\n\nSETELAH MENGUBAH POIN, Anda WAJIB menekan tombol "Re-Score" pada setiap event di Run Screen agar poin baru diterapkan!', 'warning', () => showDialog('Segera Hadir', 'Fitur editor poin sedang dalam pengembangan.'));
+                  } else { showDialog('Segera Hadir', 'Fitur editor poin sedang dalam pengembangan.'); }
                 }} className="w-full p-4 bg-white border-2 border-orange-100 text-orange-600 rounded-2xl font-black uppercase tracking-widest hover:border-orange-400 hover:bg-orange-50 transition shadow-sm flex items-center justify-center gap-3"><Edit3 size={18}/> Set Poin Alternatif</button>
               </div>
             </div>
