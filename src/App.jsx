@@ -14,23 +14,19 @@ import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged }
 import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 
 // --- Firebase Initialization ---
-let firebaseConfig;
-if (typeof __firebase_config !== 'undefined') {
-  // Mode Canvas / Sandbox
-  firebaseConfig = JSON.parse(__firebase_config);
-} else {
-  // Mode Vercel / GitHub / Local
-  // PERHATIAN: Saat memindahkan kode ini ke komputer Anda (Vite / VS Code), 
-  // ganti string kosong ("") di bawah ini dengan: import.meta.env.VITE_FIREBASE_API_KEY dst.
-  firebaseConfig = {
-    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-    appId: import.meta.env.VITE_FIREBASE_APP_ID
-  };
-}
+// PERHATIAN: Masukkan konfigurasi Firebase Anda di sini.
+// Anda tidak perlu lagi repot mengatur file .env Vite.
+const localFirebaseConfig = {
+  apiKey: "AIzaSyAcpSBOSCORdEORCAFlUvzCCrgZjTPNwc4",
+  authDomain: "mmmeetmanager.firebaseapp.com",
+  projectId: "mmmeetmanager",
+  storageBucket: "mmmeetmanager.firebasestorage.app",
+  messagingSenderId: "172347741761",
+  appId: "1:172347741761:web:293174a830c2e3c8dd58c0"
+};
+
+// Mode Cerdas: Jika berjalan di Canvas AI, gunakan config Canvas. Jika di komputer Anda, gunakan localFirebaseConfig.
+const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : localFirebaseConfig;
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -55,6 +51,10 @@ const App = () => {
   const [showNewMeetModal, setShowNewMeetModal] = useState(false);
   const [showChangePinModal, setShowChangePinModal] = useState(false);
   const [newMeetForm, setNewMeetForm] = useState({ name: '', date: '', location: '', adminPin: '' });
+
+  // --- Point Editor States ---
+  const [editingPointsType, setEditingPointsType] = useState(null); // 'standard' or 'alternative'
+  const [tempPoints, setTempPoints] = useState([]);
 
   // --- Centralized Custom Dialog State ---
   const [dialog, setDialog] = useState(null); 
@@ -118,10 +118,8 @@ const App = () => {
   const updateActiveMeet = async (updates) => {
     if (!activeMeetId) return;
     
-    // 1. Update UI secara instan (Optimistic)
     setMeets(prevMeets => prevMeets.map(m => m.id === activeMeetId ? { ...m, ...updates } : m));
 
-    // 2. Kirim perubahan ke Firebase di latar belakang
     if (!user) return;
     const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'meets', activeMeetId);
     try {
@@ -244,14 +242,44 @@ const App = () => {
     e.target.reset();
   };
 
+  // --- Point Editor Controllers ---
+  const handleOpenPointEditor = (type) => {
+    setEditingPointsType(type);
+    setTempPoints([...(scoringTable[type] || Array(20).fill(0))]);
+  };
+
+  const handleSavePoints = () => {
+    updateActiveMeet({
+        scoringTable: {
+            ...scoringTable,
+            [editingPointsType]: tempPoints.map(p => parseInt(p) || 0)
+        }
+    });
+    setEditingPointsType(null);
+    showDialog('Tersimpan', `Poin ${editingPointsType === 'standard' ? 'Standar' : 'Alternatif'} berhasil diperbarui.\n\nJangan lupa tekan tombol Re-Score pada Run Screen jika lomba sudah berjalan.`, 'success');
+  };
+
   // --- Teams Management ---
   const [teamForm, setTeamForm] = useState({ name: '', abbr: '' });
   const registerTeam = (e) => {
     e.preventDefault();
-    if (!teamForm.name || !teamForm.abbr) return;
-    const isDup = teams.some(t => t.name.toLowerCase() === teamForm.name.toLowerCase() || t.abbr.toLowerCase() === teamForm.abbr.toLowerCase());
+    if (!teamForm.name) return; // Hanya butuh nama tim
+
+    // Auto ABBR Generation Logic
+    let finalAbbr = teamForm.abbr.trim().toUpperCase();
+    if (!finalAbbr) {
+      const words = teamForm.name.trim().split(/\s+/);
+      if (words.length > 1) {
+        finalAbbr = words.map(w => w[0]).join('').substring(0, 5).toUpperCase();
+      } else {
+        finalAbbr = teamForm.name.trim().substring(0, 3).toUpperCase();
+      }
+    }
+
+    const isDup = teams.some(t => t.name.toLowerCase() === teamForm.name.trim().toLowerCase() || t.abbr.toLowerCase() === finalAbbr.toLowerCase());
     if (isDup) return showDialog('Ditolak', 'Nama Tim atau ABBR sudah digunakan!', 'error');
-    updateActiveMeet({ teams: [...teams, { id: 'tm-' + Date.now(), name: teamForm.name.trim(), abbr: teamForm.abbr.trim().toUpperCase() }] });
+    
+    updateActiveMeet({ teams: [...teams, { id: 'tm-' + Date.now(), name: teamForm.name.trim(), abbr: finalAbbr }] });
     setTeamForm({ name: '', abbr: '' });
   };
 
@@ -368,10 +396,21 @@ const App = () => {
     
     events.forEach(event => {
       const eventEntries = updatedEntries.filter(en => en.eventId === event.id);
+      
+      // Mengurutkan dari Tercepat (misal 00:25.00) ke Terlambat (misal 99:99.99)
       eventEntries.sort((a, b) => a.seedTime.localeCompare(b.seedTime));
 
+      const totalSwimmers = eventEntries.length;
+      if (totalSwimmers === 0) return;
+
+      const numHeats = Math.ceil(totalSwimmers / laneCount);
+
       eventEntries.forEach((entry, index) => {
-        const heatNum = Math.floor(index / laneCount) + 1;
+        // Karena di-sort dari tercepat ke terlambat, index 0, 1, 2 (yang tercepat)
+        // akan mengisi heat akhir secara penuh.
+        const heatIndexFromEnd = Math.floor(index / laneCount);
+        const heatNum = numHeats - heatIndexFromEnd;
+        
         const indexInHeat = index % laneCount;
         
         let lanes = [];
@@ -381,12 +420,13 @@ const App = () => {
             if(center + l <= laneCount) lanes.push(center + l);
             if(center - l >= 1) lanes.push(center - l);
         }
+        
         entry.heat = heatNum;
         entry.lane = lanes[indexInHeat];
       });
     });
     updateActiveMeet({ entries: updatedEntries, isSeeded: true });
-    showDialog('Seeding Selesai', `Seeding FINA untuk kolam ${laneCount} lintasan telah berhasil di-generate!`, 'success');
+    showDialog('Seeding Selesai', `Seeding FINA untuk kolam ${laneCount} lintasan telah berhasil di-generate!\n(Heat paling akhir telah diisi penuh)`, 'success');
   };
 
   const moveEntry = (entryId, newHeat, newLane) => {
@@ -729,7 +769,6 @@ const App = () => {
     }
   };
 
-  // --- Fungsi Preview Sertifikat (Dummy Data) ---
   const handlePreviewCert = async () => {
     if (!certBg) return showDialog('Error', 'Upload background sertifikat terlebih dahulu untuk melihat preview!', 'error');
 
@@ -1226,8 +1265,6 @@ const App = () => {
   );
 
   const renderMasterSetup = () => {
-    const hasResults = entries.some(en => en.resultTime && en.resultTime.trim() !== '');
-
     return (
       <div className="space-y-8 pb-20">
         <section className="bg-white p-8 rounded-3xl border shadow-sm">
@@ -1289,16 +1326,8 @@ const App = () => {
               <h4 className="font-black text-sm uppercase text-slate-800 tracking-widest">Pengaturan Poin Peringkat</h4>
               <p className="text-xs text-slate-500 font-medium pb-6 mt-2 px-4">Tentukan perolehan poin dari peringkat 1 hingga 20. Klik tombol di bawah untuk mengatur.</p>
               <div className="flex flex-col gap-4">
-                <button onClick={() => {
-                  if (hasResults) {
-                    showDialog('Hak Veto Master', 'Perlombaan sudah berjalan.\n\nKarena Anda login sebagai Master, Anda diizinkan untuk mengubah sistem poin.\n\nSETELAH MENGUBAH POIN, Anda WAJIB menekan tombol "Re-Score" pada setiap event di Run Screen agar poin baru diterapkan!', 'warning', () => showDialog('Segera Hadir', 'Fitur editor poin sedang dalam pengembangan.'));
-                  } else { showDialog('Segera Hadir', 'Fitur editor poin sedang dalam pengembangan.'); }
-                }} className="w-full p-4 bg-white border-2 border-indigo-100 text-indigo-700 rounded-2xl font-black uppercase tracking-widest hover:border-indigo-400 hover:bg-indigo-50 transition shadow-sm flex items-center justify-center gap-3"><Edit3 size={18}/> Set Poin Standar</button>
-                <button onClick={() => {
-                  if (hasResults) {
-                    showDialog('Hak Veto Master', 'Perlombaan sudah berjalan.\n\nKarena Anda login sebagai Master, Anda diizinkan untuk mengubah sistem poin.\n\nSETELAH MENGUBAH POIN, Anda WAJIB menekan tombol "Re-Score" pada setiap event di Run Screen agar poin baru diterapkan!', 'warning', () => showDialog('Segera Hadir', 'Fitur editor poin sedang dalam pengembangan.'));
-                  } else { showDialog('Segera Hadir', 'Fitur editor poin sedang dalam pengembangan.'); }
-                }} className="w-full p-4 bg-white border-2 border-orange-100 text-orange-600 rounded-2xl font-black uppercase tracking-widest hover:border-orange-400 hover:bg-orange-50 transition shadow-sm flex items-center justify-center gap-3"><Edit3 size={18}/> Set Poin Alternatif</button>
+                <button onClick={() => handleOpenPointEditor('standard')} className="w-full p-4 bg-white border-2 border-indigo-100 text-indigo-700 rounded-2xl font-black uppercase tracking-widest hover:border-indigo-400 hover:bg-indigo-50 transition shadow-sm flex items-center justify-center gap-3"><Edit3 size={18}/> Set Poin Standar</button>
+                <button onClick={() => handleOpenPointEditor('alternative')} className="w-full p-4 bg-white border-2 border-orange-100 text-orange-600 rounded-2xl font-black uppercase tracking-widest hover:border-orange-400 hover:bg-orange-50 transition shadow-sm flex items-center justify-center gap-3"><Edit3 size={18}/> Set Poin Alternatif</button>
               </div>
             </div>
           </div>
@@ -1362,7 +1391,7 @@ const App = () => {
            </div>
            <div className="md:col-span-3">
               <label className="text-[10px] font-black uppercase text-indigo-700 block mb-1">Singkatan (ABBR)</label>
-              <input value={teamForm.abbr} onChange={e => setTeamForm({...teamForm, abbr: e.target.value})} className="w-full p-4 bg-white border border-indigo-200 rounded-xl font-black text-center uppercase focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="MNA" required maxLength={5} />
+              <input value={teamForm.abbr} onChange={e => setTeamForm({...teamForm, abbr: e.target.value})} className="w-full p-4 bg-white border border-indigo-200 rounded-xl font-black text-center uppercase focus:ring-2 focus:ring-indigo-500 outline-none placeholder:text-slate-300" placeholder="Otomatis" maxLength={5} />
            </div>
            <div className="md:col-span-2">
              <button type="submit" className="w-full bg-indigo-600 text-white p-4 rounded-xl font-black uppercase hover:bg-indigo-700 shadow-md transition active:scale-95 h-[58px]">Tambah</button>
@@ -1573,7 +1602,7 @@ const App = () => {
           if (entryMode === 'individual') {
              return ev.type === 'Individual' && (ev.gender === selectedEntryEntity.gender || ev.gender === 'Mix') && selectedEntryEntity.category.includes(ev.category);
           } else {
-             return ev.type === 'Estafet'; // Tim bisa ikut estafet KU mana saja, biasanya pelatih yang filter sendiri
+             return ev.type === 'Estafet'; 
           }
         })
       : [];
@@ -1688,7 +1717,7 @@ const App = () => {
           <div className="bg-blue-50 w-24 h-24 rounded-full flex items-center justify-center mx-auto text-blue-500"><Layout size={48} /></div>
           <div className="space-y-2">
             <h2 className="text-3xl font-black text-slate-800 uppercase tracking-tighter">Otomatisasi Seeding FINA</h2>
-            <p className="text-slate-400 font-medium">Tentukan jumlah lintasan kolam. Algoritma akan menempatkan perenang tercepat di tengah.</p>
+            <p className="text-slate-400 font-medium">Tentukan jumlah lintasan kolam. Algoritma akan menempatkan perenang tercepat di heat terakhir.</p>
           </div>
           <div className="max-w-xs mx-auto space-y-4">
             <label className="text-xs font-black uppercase text-slate-400 tracking-widest">Input Jumlah Lintasan</label>
@@ -2140,12 +2169,12 @@ const App = () => {
                           <span className="font-black text-slate-700 uppercase text-xs">{key === 'name' ? 'Nama Atlet' : key === 'team' ? 'Nama Klub' : key === 'event' ? 'Nama Lomba' : key === 'time' ? 'Waktu' : 'Peringkat'}</span>
                         </div>
                         <label className="flex items-center gap-2 cursor-pointer">
-                          <input type="checkbox" checked={certCoords[key]?.show} onChange={(e) => updateActiveMeetCloud({ certCoords: { ...certCoords, [key]: { ...certCoords[key], show: e.target.checked } } })} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500"/>
+                          <input type="checkbox" checked={certCoords[key]?.show} onChange={(e) => updateActiveMeet({ certCoords: { ...certCoords, [key]: { ...certCoords[key], show: e.target.checked } } })} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500"/>
                           <span className="text-xs font-bold text-slate-500">Tampilkan</span>
                         </label>
                         <div className="flex-1 flex gap-2">
-                           <div className="flex items-center bg-white border rounded-lg px-2 flex-1"><span className="text-[10px] font-black text-slate-400 mr-2">X:</span><input type="number" value={certCoords[key]?.x} onChange={(e) => updateActiveMeetCloud({ certCoords: { ...certCoords, [key]: { ...certCoords[key], x: parseInt(e.target.value) || 0 } } })} className="w-full py-1 text-center font-bold text-sm outline-none bg-transparent" disabled={!certCoords[key]?.show}/></div>
-                           <div className="flex items-center bg-white border rounded-lg px-2 flex-1"><span className="text-[10px] font-black text-slate-400 mr-2">Y:</span><input type="number" value={certCoords[key]?.y} onChange={(e) => updateActiveMeetCloud({ certCoords: { ...certCoords, [key]: { ...certCoords[key], y: parseInt(e.target.value) || 0 } } })} className="w-full py-1 text-center font-bold text-sm outline-none bg-transparent" disabled={!certCoords[key]?.show}/></div>
+                           <div className="flex items-center bg-white border rounded-lg px-2 flex-1"><span className="text-[10px] font-black text-slate-400 mr-2">X:</span><input type="number" value={certCoords[key]?.x} onChange={(e) => updateActiveMeet({ certCoords: { ...certCoords, [key]: { ...certCoords[key], x: parseInt(e.target.value) || 0 } } })} className="w-full py-1 text-center font-bold text-sm outline-none bg-transparent" disabled={!certCoords[key]?.show}/></div>
+                           <div className="flex items-center bg-white border rounded-lg px-2 flex-1"><span className="text-[10px] font-black text-slate-400 mr-2">Y:</span><input type="number" value={certCoords[key]?.y} onChange={(e) => updateActiveMeet({ certCoords: { ...certCoords, [key]: { ...certCoords[key], y: parseInt(e.target.value) || 0 } } })} className="w-full py-1 text-center font-bold text-sm outline-none bg-transparent" disabled={!certCoords[key]?.show}/></div>
                         </div>
                      </div>
                    ))}
@@ -2330,6 +2359,34 @@ const App = () => {
               </div>
             </div>
           </form>
+        </div>
+      )}
+
+      {/* Editor Poin Standar & Alternatif Modal */}
+      {editingPointsType && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[9990] flex items-center justify-center p-6">
+          <div className="bg-white w-full max-w-2xl rounded-[2.5rem] p-10 shadow-2xl animate-in zoom-in border border-slate-100 max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="shrink-0 mb-6">
+                <h3 className="text-2xl font-black uppercase tracking-tighter text-slate-800">Edit Poin {editingPointsType === 'standard' ? 'Standar' : 'Alternatif'}</h3>
+                <p className="text-slate-400 text-sm font-medium">Tentukan perolehan poin untuk juara 1 hingga peringkat ke 20.</p>
+            </div>
+            <div className="flex-1 overflow-y-auto pr-2 grid grid-cols-2 md:grid-cols-4 gap-4">
+                {tempPoints.map((pts, idx) => (
+                    <div key={idx} className="bg-slate-50 p-3 rounded-xl border border-slate-200">
+                        <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">Juara {idx + 1}</label>
+                        <input type="number" className="w-full p-2 bg-white border rounded-lg font-bold text-center focus:ring-2 focus:ring-blue-500 outline-none" value={pts} onChange={(e) => {
+                            const newPts = [...tempPoints];
+                            newPts[idx] = e.target.value;
+                            setTempPoints(newPts);
+                        }} />
+                    </div>
+                ))}
+            </div>
+            <div className="flex gap-4 pt-6 mt-4 border-t border-slate-100 shrink-0">
+              <button onClick={() => setEditingPointsType(null)} className="flex-1 p-4 rounded-2xl font-black uppercase text-slate-500 hover:bg-slate-100 transition">Batal</button>
+              <button onClick={handleSavePoints} className="flex-1 bg-blue-600 text-white p-4 rounded-2xl font-black uppercase hover:bg-blue-700 shadow-xl shadow-blue-200 transition active:scale-95">Simpan Poin</button>
+            </div>
+          </div>
         </div>
       )}
 
