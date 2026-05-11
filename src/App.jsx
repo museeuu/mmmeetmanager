@@ -20,8 +20,9 @@ if (typeof __firebase_config !== 'undefined') {
   firebaseConfig = JSON.parse(__firebase_config);
 } else {
   // Mode Vercel / GitHub / Local
-  // PERHATIAN: Hapus nilai dummy ini dan kembalikan menjadi import.meta.env
-  // saat Anda mem-paste kode ini ke VS Code lokal Anda sebelum melakukan git push!
+  // AMAN UNTUK CANVAS.
+  // PENTING: Saat copy kode ini ke VS Code, isi kutip kosong di bawah ini dengan 
+  // variabel rahasia Vite Anda agar bisa jalan di Vercel.
   firebaseConfig = {
     apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
     authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -36,6 +37,7 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = 'swim-meet-pro-cloud';
+
 
 const App = () => {
   // --- Auth & User State ---
