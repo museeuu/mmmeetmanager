@@ -20,8 +20,8 @@ if (typeof __firebase_config !== 'undefined') {
   firebaseConfig = JSON.parse(__firebase_config);
 } else {
   // Mode Vercel / GitHub / Local
-  // PERHATIAN: Saat memindahkan kode ini ke komputer Anda (Vite / VS Code), 
-  // ganti string kosong ("") di bawah ini dengan: import.meta.env.VITE_FIREBASE_API_KEY dst.
+  // PERHATIAN: Hapus nilai dummy ini dan kembalikan menjadi import.meta.env
+  // saat Anda mem-paste kode ini ke VS Code lokal Anda sebelum melakukan git push!
   firebaseConfig = {
     apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
     authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
@@ -35,7 +35,7 @@ if (typeof __firebase_config !== 'undefined') {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'swim-meet-pro-cloud';
+const appId = 'swim-meet-pro-cloud';
 
 const App = () => {
   // --- Auth & User State ---
@@ -74,10 +74,15 @@ const App = () => {
         }
       } catch (err) {
         console.error("Auth error:", err);
+        setLoading(false); // Mencegah loading abadi jika Auth gagal
       }
     };
     initAuth();
-    const unsubscribe = onAuthStateChanged(auth, setUser);
+    
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      if (!u) setLoading(false); // Tampilkan halaman login jika user null
+    });
     return () => unsubscribe();
   }, []);
 
@@ -105,7 +110,7 @@ const App = () => {
   const [editingEntry, setEditingEntry] = useState(null);
   const [leaderboardMode] = useState('standard'); 
   const [reportTab, setReportTab] = useState('points');
-  const [pointModal, setPointModal] = useState(null); // Variabel Editor Poin dihidupkan
+  const [pointModal, setPointModal] = useState(null);
   const [runEventId, setRunEventId] = useState(null);
   const [runHeat, setRunHeat] = useState(1);
   const [isImporting, setIsImporting] = useState(false); 
