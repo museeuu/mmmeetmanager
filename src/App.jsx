@@ -971,7 +971,22 @@ const App = () => {
         const row = jsonData[i]; if (!row || row.length === 0 || row[hMap.name] === undefined || row[hMap.name] === '') continue;
 
         const nameStr = row[hMap.name]; const orgStr = hMap.org !== -1 ? (row[hMap.org] || 'Independen') : 'Independen';
-        const abbrStr = hMap.abbr !== -1 ? (row[hMap.abbr] || 'IND').toUpperCase() : 'IND'; const distStr = hMap.district !== -1 ? (row[hMap.district] || '-') : '-';
+        
+        // --- AUTO ABBR LOGIC UNTUK IMPORT EXCEL ---
+        let rawAbbr = hMap.abbr !== -1 ? String(row[hMap.abbr] || '').trim() : '';
+        let abbrStr = 'IND';
+        if (rawAbbr) {
+            abbrStr = rawAbbr.toUpperCase();
+        } else if (orgStr.toLowerCase() !== 'independen') {
+            const words = orgStr.trim().split(/\s+/);
+            if (words.length > 1) {
+                abbrStr = words.map(w => w[0]).join('').substring(0, 5).toUpperCase();
+            } else {
+                abbrStr = orgStr.trim().substring(0, 3).toUpperCase();
+            }
+        }
+        
+        const distStr = hMap.district !== -1 ? (row[hMap.district] || '-') : '-';
         const gradeStr = hMap.grade !== -1 ? (row[hMap.grade] || '-') : '-'; const genderStr = hMap.gender !== -1 ? (row[hMap.gender] || 'Putra') : 'Putra';
         const dobStrRaw = hMap.dob !== -1 ? (row[hMap.dob] || '') : ''; const dobStr = formatDateForInput(dobStrRaw);
         const eventStr = hMap.event !== -1 ? (row[hMap.event] || '') : ''; const seedStr = hMap.seed !== -1 ? (row[hMap.seed] || '99:99.99') : '99:99.99';
