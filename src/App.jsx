@@ -20,20 +20,22 @@ if (typeof __firebase_config !== 'undefined') {
   firebaseConfig = JSON.parse(__firebase_config);
 } else {
   // Mode Vercel / GitHub / Local
+  // PERHATIAN: Saat memindahkan kode ini ke komputer Anda (Vite / VS Code), 
+  // ganti string kosong ("") di bawah ini dengan: import.meta.env.VITE_FIREBASE_API_KEY dst.
   firebaseConfig = {
-    apiKey: "AIzaSyAcpSBOSCORdEORCAFlUvzCCrgZjTPNwc4",
-    authDomain: "mmmeetmanager.firebaseapp.com",
-    projectId: "mmmeetmanager",
-    storageBucket: "mmmeetmanager.firebasestorage.app",
-    messagingSenderId: "172347741761",
-    appId: "1:172347741761:web:293174a830c2e3c8dd58c0"
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    appId: import.meta.env.VITE_FIREBASE_APP_ID
   };
 }
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = 'swim-meet-pro-cloud';
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'swim-meet-pro-cloud';
 
 const App = () => {
   // --- Auth & User State ---
@@ -72,15 +74,10 @@ const App = () => {
         }
       } catch (err) {
         console.error("Auth error:", err);
-        setLoading(false); // Mencegah loading abadi jika Auth gagal
       }
     };
     initAuth();
-    
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
-      if (!u) setLoading(false); // Tampilkan halaman login jika user null
-    });
+    const unsubscribe = onAuthStateChanged(auth, setUser);
     return () => unsubscribe();
   }, []);
 
@@ -108,7 +105,6 @@ const App = () => {
   const [editingEntry, setEditingEntry] = useState(null);
   const [leaderboardMode] = useState('standard'); 
   const [reportTab, setReportTab] = useState('points');
-  const [pointModal, setPointModal] = useState(null);
   const [runEventId, setRunEventId] = useState(null);
   const [runHeat, setRunHeat] = useState(1);
   const [isImporting, setIsImporting] = useState(false); 
@@ -1295,13 +1291,13 @@ const App = () => {
               <div className="flex flex-col gap-4">
                 <button onClick={() => {
                   if (hasResults) {
-                    showDialog('Hak Veto Master', 'Perlombaan sudah berjalan.\n\nKarena Anda login sebagai Master, Anda diizinkan untuk mengubah sistem poin.\n\nSETELAH MENGUBAH POIN, Anda WAJIB menekan tombol "Re-Score" pada setiap event di Run Screen agar poin baru diterapkan!', 'warning', () => setPointModal('standard'));
-                  } else { setPointModal('standard'); }
+                    showDialog('Hak Veto Master', 'Perlombaan sudah berjalan.\n\nKarena Anda login sebagai Master, Anda diizinkan untuk mengubah sistem poin.\n\nSETELAH MENGUBAH POIN, Anda WAJIB menekan tombol "Re-Score" pada setiap event di Run Screen agar poin baru diterapkan!', 'warning', () => showDialog('Segera Hadir', 'Fitur editor poin sedang dalam pengembangan.'));
+                  } else { showDialog('Segera Hadir', 'Fitur editor poin sedang dalam pengembangan.'); }
                 }} className="w-full p-4 bg-white border-2 border-indigo-100 text-indigo-700 rounded-2xl font-black uppercase tracking-widest hover:border-indigo-400 hover:bg-indigo-50 transition shadow-sm flex items-center justify-center gap-3"><Edit3 size={18}/> Set Poin Standar</button>
                 <button onClick={() => {
                   if (hasResults) {
-                    showDialog('Hak Veto Master', 'Perlombaan sudah berjalan.\n\nKarena Anda login sebagai Master, Anda diizinkan untuk mengubah sistem poin.\n\nSETELAH MENGUBAH POIN, Anda WAJIB menekan tombol "Re-Score" pada setiap event di Run Screen agar poin baru diterapkan!', 'warning', () => setPointModal('alternative'));
-                  } else { setPointModal('alternative'); }
+                    showDialog('Hak Veto Master', 'Perlombaan sudah berjalan.\n\nKarena Anda login sebagai Master, Anda diizinkan untuk mengubah sistem poin.\n\nSETELAH MENGUBAH POIN, Anda WAJIB menekan tombol "Re-Score" pada setiap event di Run Screen agar poin baru diterapkan!', 'warning', () => showDialog('Segera Hadir', 'Fitur editor poin sedang dalam pengembangan.'));
+                  } else { showDialog('Segera Hadir', 'Fitur editor poin sedang dalam pengembangan.'); }
                 }} className="w-full p-4 bg-white border-2 border-orange-100 text-orange-600 rounded-2xl font-black uppercase tracking-widest hover:border-orange-400 hover:bg-orange-50 transition shadow-sm flex items-center justify-center gap-3"><Edit3 size={18}/> Set Poin Alternatif</button>
               </div>
             </div>
@@ -1344,45 +1340,6 @@ const App = () => {
             ))}
           </div>
         </section>
-
-        {/* --- MODAL EDITOR POIN --- */}
-        {pointModal && (
-          <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[9990] flex items-center justify-center p-6 animate-in fade-in">
-            <div className="bg-white w-full max-w-2xl rounded-[2.5rem] p-10 shadow-2xl animate-in zoom-in border border-slate-100 max-h-[90vh] overflow-y-auto">
-              <h3 className="text-2xl font-black mb-2 uppercase tracking-tighter text-slate-800">
-                Edit Poin {pointModal === 'standard' ? 'Standar' : 'Alternatif'}
-              </h3>
-              <p className="text-slate-400 text-sm mb-6 font-medium">Ubah perolehan poin dari peringkat 1 hingga 20.</p>
-              
-              <form onSubmit={(e) => {
-                e.preventDefault();
-                const formData = new FormData(e.target);
-                const newPoints = [];
-                for (let i = 0; i < 20; i++) {
-                  newPoints.push(parseInt(formData.get(`point_${i}`)) || 0);
-                }
-                updateActiveMeet({
-                  scoringTable: { ...scoringTable, [pointModal]: newPoints }
-                });
-                setPointModal(null);
-                showDialog('Sukses', `Sistem Poin ${pointModal === 'standard' ? 'Standar' : 'Alternatif'} berhasil diperbarui dan tersimpan di Cloud.`, 'success');
-              }}>
-                <div className="grid grid-cols-4 md:grid-cols-5 gap-4 mb-8">
-                  {scoringTable[pointModal].map((pts, idx) => (
-                    <div key={idx} className="bg-slate-50 p-2 rounded-xl border border-slate-100 text-center shadow-sm">
-                      <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">Pos {idx + 1}</label>
-                      <input type="number" name={`point_${idx}`} defaultValue={pts} className="w-full p-2 bg-white border border-slate-200 rounded-lg font-black text-blue-700 focus:ring-2 focus:ring-blue-500 outline-none text-center" min="0" />
-                    </div>
-                  ))}
-                </div>
-                <div className="flex gap-4 pt-4 border-t border-slate-100">
-                  <button type="button" onClick={() => setPointModal(null)} className="flex-1 p-4 rounded-2xl font-black uppercase text-slate-500 hover:bg-slate-100 transition">Batal</button>
-                  <button type="submit" className="flex-1 bg-blue-600 text-white p-4 rounded-2xl font-black uppercase hover:bg-blue-700 shadow-xl shadow-blue-200 transition active:scale-95">Simpan Poin</button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
       </div>
     );
   };
@@ -2187,8 +2144,8 @@ const App = () => {
                           <span className="text-xs font-bold text-slate-500">Tampilkan</span>
                         </label>
                         <div className="flex-1 flex gap-2">
-                           <div className="flex items-center bg-white border rounded-lg px-2 flex-1"><span className="text-[10px] font-black text-slate-400 mr-2">X:</span><input type="number" value={certCoords[key]?.x} onChange={(e) => updateActiveMeet({ certCoords: { ...certCoords, [key]: { ...certCoords[key], x: parseInt(e.target.value) || 0 } } })} className="w-full py-1 text-center font-bold text-sm outline-none bg-transparent" disabled={!certCoords[key]?.show}/></div>
-                           <div className="flex items-center bg-white border rounded-lg px-2 flex-1"><span className="text-[10px] font-black text-slate-400 mr-2">Y:</span><input type="number" value={certCoords[key]?.y} onChange={(e) => updateActiveMeet({ certCoords: { ...certCoords, [key]: { ...certCoords[key], y: parseInt(e.target.value) || 0 } } })} className="w-full py-1 text-center font-bold text-sm outline-none bg-transparent" disabled={!certCoords[key]?.show}/></div>
+                           <div className="flex items-center bg-white border rounded-lg px-2 flex-1"><span className="text-[10px] font-black text-slate-400 mr-2">X:</span><input type="number" value={certCoords[key]?.x} onChange={(e) => updateActiveMeetCloud({ certCoords: { ...certCoords, [key]: { ...certCoords[key], x: parseInt(e.target.value) || 0 } } })} className="w-full py-1 text-center font-bold text-sm outline-none bg-transparent" disabled={!certCoords[key]?.show}/></div>
+                           <div className="flex items-center bg-white border rounded-lg px-2 flex-1"><span className="text-[10px] font-black text-slate-400 mr-2">Y:</span><input type="number" value={certCoords[key]?.y} onChange={(e) => updateActiveMeetCloud({ certCoords: { ...certCoords, [key]: { ...certCoords[key], y: parseInt(e.target.value) || 0 } } })} className="w-full py-1 text-center font-bold text-sm outline-none bg-transparent" disabled={!certCoords[key]?.show}/></div>
                         </div>
                      </div>
                    ))}
@@ -2203,45 +2160,180 @@ const App = () => {
            </div>
         </div>
       )}
+    </div>
+  );
 
-      {/* --- MODAL EDITOR POIN --- */}
-      {pointModal && (
-        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[9990] flex items-center justify-center p-6 animate-in fade-in">
-          <div className="bg-white w-full max-w-2xl rounded-[2.5rem] p-10 shadow-2xl animate-in zoom-in border border-slate-100 max-h-[90vh] overflow-y-auto">
-            <h3 className="text-2xl font-black mb-2 uppercase tracking-tighter text-slate-800">
-              Edit Poin {pointModal === 'standard' ? 'Standar' : 'Alternatif'}
-            </h3>
-            <p className="text-slate-400 text-sm mb-6 font-medium">Ubah perolehan poin dari peringkat 1 hingga 20.</p>
-            
-            <form onSubmit={(e) => {
-              e.preventDefault();
-              const formData = new FormData(e.target);
-              const newPoints = [];
-              for (let i = 0; i < 20; i++) {
-                newPoints.push(parseInt(formData.get(`point_${i}`)) || 0);
-              }
-              updateActiveMeet({
-                scoringTable: { ...scoringTable, [pointModal]: newPoints }
-              });
-              setPointModal(null);
-              showDialog('Sukses', `Sistem Poin ${pointModal === 'standard' ? 'Standar' : 'Alternatif'} berhasil diperbarui dan tersimpan di Cloud.`, 'success');
-            }}>
-              <div className="grid grid-cols-4 md:grid-cols-5 gap-4 mb-8">
-                {scoringTable[pointModal].map((pts, idx) => (
-                  <div key={idx} className="bg-slate-50 p-2 rounded-xl border border-slate-100 text-center shadow-sm">
-                    <label className="text-[10px] font-black uppercase text-slate-400 block mb-1">Pos {idx + 1}</label>
-                    <input type="number" name={`point_${idx}`} defaultValue={pts} className="w-full p-2 bg-white border border-slate-200 rounded-lg font-black text-blue-700 focus:ring-2 focus:ring-blue-500 outline-none text-center" min="0" />
-                  </div>
-                ))}
+  // ==========================================
+  // MAIN APP RENDER
+  // ==========================================
+  if (loading) return (
+    <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-white">
+      <Loader2 className="animate-spin mb-4 text-blue-500" size={48} />
+      <p className="font-black uppercase tracking-widest text-xs text-blue-200">Menghubungkan ke Cloud...</p>
+    </div>
+  );
+
+  if (!isLoggedIn) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4">
+        <div className="bg-white w-full max-w-md rounded-[3rem] p-12 shadow-2xl space-y-10 border border-slate-100 animate-in fade-in">
+          <div className="text-center">
+            <div className="bg-blue-600 w-24 h-24 rounded-3xl mx-auto flex items-center justify-center text-white mb-6 shadow-2xl shadow-blue-500/50 ring-8 ring-blue-50"><Cloud size={48} /></div>
+            <h1 className="text-4xl font-black text-slate-900 tracking-tighter uppercase leading-none">SwimMeet Cloud</h1>
+            <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.3em] mt-3">Firebase Multi-User System</p>
+          </div>
+          <div className="space-y-6">
+            <div className="space-y-2">
+              <label className="text-[10px] font-black uppercase text-slate-400 ml-3 tracking-widest">Kredensial Akses</label>
+              <div className="relative">
+                <input type="password" className="w-full p-5 pl-14 bg-slate-50 border-2 border-slate-100 rounded-3xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 outline-none font-bold text-xl transition-all" placeholder="PIN Lomba / Master..." value={passwordInput} onChange={(e) => setPasswordInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleLogin()} />
+                <Lock className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300" size={24} />
               </div>
-              <div className="flex gap-4 pt-4 border-t border-slate-100">
-                <button type="button" onClick={() => setPointModal(null)} className="flex-1 p-4 rounded-2xl font-black uppercase text-slate-500 hover:bg-slate-100 transition">Batal</button>
-                <button type="submit" className="flex-1 bg-blue-600 text-white p-4 rounded-2xl font-black uppercase hover:bg-blue-700 shadow-xl shadow-blue-200 transition active:scale-95">Simpan Poin</button>
-              </div>
-            </form>
+            </div>
+            <button onClick={handleLogin} className="w-full bg-slate-900 text-white p-5 rounded-3xl font-black text-lg shadow-2xl hover:bg-black transition-all active:scale-95 uppercase tracking-widest">Masuk Cloud</button>
+            <div className="text-[9px] text-center font-bold text-slate-300 uppercase tracking-widest">Pusat Database Online</div>
           </div>
         </div>
+        {dialog && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-6">
+            <div className="bg-white p-10 rounded-[2.5rem] max-w-sm text-center shadow-2xl animate-in zoom-in">
+              <div className="bg-blue-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-blue-600"><AlertCircle size={32}/></div>
+              <h3 className="text-xl font-black uppercase mb-2">{dialog.title}</h3>
+              <p className="text-sm text-slate-500 font-medium mb-8 leading-relaxed">{dialog.message}</p>
+              <button onClick={closeDialog} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black uppercase tracking-widest text-xs">Mengerti</button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-100 flex flex-col md:flex-row font-sans selection:bg-blue-100">
+      
+      {/* Sidebar */}
+      <div className="w-full md:w-64 bg-[#0b1120] text-slate-300 flex flex-col shrink-0 z-20 h-screen overflow-hidden shadow-2xl">
+        <div className="flex flex-col gap-4 p-6 border-b border-white/10">
+          {role === 'master' && (
+            <button onClick={() => { setActiveMeetId(null); setSuperView('meets'); }} className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-400 hover:text-white transition">
+              <ArrowLeft size={12}/> Kembali ke Daftar Lomba
+            </button>
+          )}
+          <div className="flex items-center gap-4">
+            <div className="bg-blue-600 p-2.5 rounded-xl shadow-lg"><Cloud size={24} className="text-white" /></div>
+            <div>
+              <h1 className="text-xl font-black text-white uppercase truncate max-w-[130px]">{meetInfo?.name || "Master"}</h1>
+              <span className="text-[9px] text-emerald-400 font-bold uppercase tracking-widest mt-1 block">✓ Terkoneksi Cloud</span>
+            </div>
+          </div>
+        </div>
+
+        <nav className="flex-1 overflow-y-auto px-4 py-6 space-y-1">
+          {activeMeetId === null ? (
+            <>
+              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3 ml-2">Manajemen Cloud</div>
+              <NavItem active={superView === 'meets'} icon={<List size={18}/>} label="Daftar Kejuaraan" onClick={() => setSuperView('meets')} />
+              <NavItem active={superView === 'main_db'} icon={<Database size={18}/>} label="Database Induk" onClick={() => setSuperView('main_db')} />
+            </>
+          ) : (
+            <>
+              <NavItem active={activeTab === 'dashboard'} icon={<Layout size={18}/>} label="Dashboard" onClick={() => setActiveTab('dashboard')} />
+              {role === 'master' && (
+                <>
+                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-8 mb-3 ml-2">Pre-Meet</div>
+                  <NavItem active={activeTab === 'master-setup'} icon={<Settings size={18}/>} label="1. Setup & Events" onClick={() => setActiveTab('master-setup')} />
+                  <NavItem active={activeTab === 'teams'} icon={<Flag size={18}/>} label="2. Tim" onClick={() => setActiveTab('teams')} />
+                  <NavItem active={activeTab === 'athletes'} icon={<Users size={18}/>} label="3. Atlet" onClick={() => setActiveTab('athletes')} />
+                  <NavItem active={activeTab === 'entries'} icon={<Edit3 size={18}/>} label="4. Entries" onClick={() => setActiveTab('entries')} />
+                  <NavItem active={activeTab === 'seeding'} icon={<Share2 size={18}/>} label="5. Seeding" onClick={() => setActiveTab('seeding')} />
+                </>
+              )}
+              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-8 mb-3 ml-2">Meet Day</div>
+              <NavItem active={activeTab === 'admin-panel'} icon={<PlayCircle size={18}/>} label="6. Run (Meja Juri)" onClick={() => setActiveTab('admin-panel')} />
+              <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-8 mb-3 ml-2">Post-Meet</div>
+              <NavItem active={activeTab === 'leaderboard'} icon={<FileText size={18}/>} label="7. Reports" onClick={() => setActiveTab('leaderboard')} />
+            </>
+          )}
+        </nav>
+
+        <div className="p-4 border-t border-white/10 space-y-2">
+          {role === 'master' && activeMeetId === null && (
+            <button onClick={() => setShowChangePinModal(true)} className="w-full flex items-center gap-3 p-3 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-all font-bold text-sm">
+              <Lock size={18} /> Ubah PIN Master
+            </button>
+          )}
+          <button onClick={handleLogout} className="w-full flex items-center gap-3 p-3 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-all font-bold text-sm">
+            <LogOut size={18} /> Logout
+          </button>
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className="flex-1 overflow-y-auto h-screen p-6 md:p-12 relative">
+        <div className="absolute top-0 left-0 w-full h-64 bg-slate-900 -z-10 rounded-b-[4rem]"></div>
+        
+        {activeMeetId === null ? (
+           <div className="max-w-6xl mx-auto space-y-10 pb-20 animate-in fade-in">
+             <div className="flex justify-between items-end mb-6">
+                <h2 className="text-2xl font-black text-white tracking-tight flex items-center gap-2"><Cloud className="text-blue-500"/> Kejuaraan Online</h2>
+                <button onClick={() => setShowNewMeetModal(true)} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-3 rounded-xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition flex items-center gap-2"><Plus size={16}/> Buat Baru</button>
+             </div>
+             
+             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                <div className="grid grid-cols-12 bg-slate-50 p-5 border-b border-slate-200 text-xs font-black uppercase text-slate-400 tracking-widest">
+                  <div className="col-span-8">Nama Kejuaraan</div><div className="col-span-4 text-right">Aksi</div>
+                </div>
+                <div className="divide-y divide-slate-100">
+                  {meets.map(meet => (
+                    <div key={meet.id} className="grid grid-cols-12 p-5 items-center hover:bg-slate-50 transition group">
+                      <div className="col-span-8">
+                        <h3 className="font-black text-lg text-slate-800 uppercase">{meet.meetInfo.name}</h3>
+                        <div className="text-[10px] text-slate-400 font-bold mt-1 uppercase flex items-center gap-2"><span>ID: {meet.id}</span><span className="bg-slate-100 px-2 py-0.5 rounded text-slate-600">PIN: {meet.adminPin}</span></div>
+                      </div>
+                      <div className="col-span-4 flex justify-end gap-3">
+                        <button onClick={() => deleteMeet(meet.id)} className="text-red-300 hover:text-red-600 p-2 transition"><Trash2 size={18}/></button>
+                        <button onClick={() => { setActiveMeetId(meet.id); setActiveTab('dashboard'); }} className="bg-blue-600 text-white font-black text-xs uppercase px-5 py-2.5 rounded-xl shadow-lg hover:bg-blue-700 transition active:scale-95">Buka Lomba</button>
+                      </div>
+                    </div>
+                  ))}
+                  {meets.length === 0 && <div className="p-20 text-center text-slate-300 font-black uppercase tracking-widest">Belum ada lomba di Cloud</div>}
+                </div>
+             </div>
+           </div>
+        ) : (
+          <div className="p-6 bg-white rounded-3xl shadow-xl min-h-[400px]">
+             {/* Konten akan menyesuaikan dengan tab yang dipilih */}
+             {activeTab === 'dashboard' && renderDashboard()}
+             {activeTab === 'master-setup' && renderMasterSetup()}
+             {activeTab === 'teams' && renderTeams()}
+             {activeTab === 'athletes' && renderAthletes()}
+             {activeTab === 'entries' && renderEntries()}
+             {activeTab === 'seeding' && renderSeedingModule()}
+             {activeTab === 'admin-panel' && renderAdminPanel()}
+             {activeTab === 'leaderboard' && renderLeaderboard()}
+          </div>
+        )}
+      </div>
+      
+      {/* Create Meet Modal */}
+      {showNewMeetModal && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-6">
+          <form onSubmit={createNewMeet} className="bg-white w-full max-w-lg rounded-[2rem] p-10 shadow-2xl animate-in zoom-in">
+            <h3 className="text-2xl font-black mb-6 uppercase tracking-tighter text-slate-800">Buat Kejuaraan Cloud</h3>
+            <div className="space-y-4">
+              <input className="w-full p-4 bg-slate-50 border rounded-2xl font-bold focus:ring-2 focus:ring-blue-500 outline-none" required placeholder="Nama Kejuaraan" value={newMeetForm.name} onChange={e => setNewMeetForm({...newMeetForm, name: e.target.value})} />
+              <input type="date" className="w-full p-4 bg-slate-50 border rounded-2xl font-bold focus:ring-2 focus:ring-blue-500 outline-none" required value={newMeetForm.date} onChange={e => setNewMeetForm({...newMeetForm, date: e.target.value})} />
+              <input className="w-full p-4 bg-slate-50 border rounded-2xl font-bold focus:ring-2 focus:ring-blue-500 outline-none" required placeholder="Lokasi Kolam" value={newMeetForm.location} onChange={e => setNewMeetForm({...newMeetForm, location: e.target.value})} />
+              <div className="flex gap-2 pt-6">
+                <button type="button" onClick={()=>setShowNewMeetModal(false)} className="flex-1 p-4 rounded-2xl font-black uppercase text-slate-500 hover:bg-slate-100 transition">Batal</button>
+                <button type="submit" className="flex-1 bg-blue-600 text-white p-4 rounded-2xl font-black uppercase shadow-xl hover:bg-blue-700 transition active:scale-95">Deploy ke Cloud</button>
+              </div>
+            </div>
+          </form>
+        </div>
       )}
+
+      {dialog && renderDialog()}
     </div>
   );
 };
