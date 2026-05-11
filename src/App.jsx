@@ -20,16 +20,13 @@ if (typeof __firebase_config !== 'undefined') {
   firebaseConfig = JSON.parse(__firebase_config);
 } else {
   // Mode Vercel / GitHub / Local
-  // AMAN UNTUK CANVAS.
-  // PENTING: Saat copy kode ini ke VS Code, isi kutip kosong di bawah ini dengan 
-  // variabel rahasia Vite Anda agar bisa jalan di Vercel.
   firebaseConfig = {
-    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-    appId: import.meta.env.VITE_FIREBASE_APP_ID
+    apiKey: "AIzaSyAcpSBOSCORdEORCAFlUvzCCrgZjTPNwc4",
+    authDomain: "mmmeetmanager.firebaseapp.com",
+    projectId: "mmmeetmanager",
+    storageBucket: "mmmeetmanager.firebasestorage.app",
+    messagingSenderId: "172347741761",
+    appId: "1:172347741761:web:293174a830c2e3c8dd58c0"
   };
 }
 
@@ -37,7 +34,6 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = 'swim-meet-pro-cloud';
-
 
 const App = () => {
   // --- Auth & User State ---
@@ -2191,8 +2187,8 @@ const App = () => {
                           <span className="text-xs font-bold text-slate-500">Tampilkan</span>
                         </label>
                         <div className="flex-1 flex gap-2">
-                           <div className="flex items-center bg-white border rounded-lg px-2 flex-1"><span className="text-[10px] font-black text-slate-400 mr-2">X:</span><input type="number" value={certCoords[key]?.x} onChange={(e) => updateActiveMeetCloud({ certCoords: { ...certCoords, [key]: { ...certCoords[key], x: parseInt(e.target.value) || 0 } } })} className="w-full py-1 text-center font-bold text-sm outline-none bg-transparent" disabled={!certCoords[key]?.show}/></div>
-                           <div className="flex items-center bg-white border rounded-lg px-2 flex-1"><span className="text-[10px] font-black text-slate-400 mr-2">Y:</span><input type="number" value={certCoords[key]?.y} onChange={(e) => updateActiveMeetCloud({ certCoords: { ...certCoords, [key]: { ...certCoords[key], y: parseInt(e.target.value) || 0 } } })} className="w-full py-1 text-center font-bold text-sm outline-none bg-transparent" disabled={!certCoords[key]?.show}/></div>
+                           <div className="flex items-center bg-white border rounded-lg px-2 flex-1"><span className="text-[10px] font-black text-slate-400 mr-2">X:</span><input type="number" value={certCoords[key]?.x} onChange={(e) => updateActiveMeet({ certCoords: { ...certCoords, [key]: { ...certCoords[key], x: parseInt(e.target.value) || 0 } } })} className="w-full py-1 text-center font-bold text-sm outline-none bg-transparent" disabled={!certCoords[key]?.show}/></div>
+                           <div className="flex items-center bg-white border rounded-lg px-2 flex-1"><span className="text-[10px] font-black text-slate-400 mr-2">Y:</span><input type="number" value={certCoords[key]?.y} onChange={(e) => updateActiveMeet({ certCoords: { ...certCoords, [key]: { ...certCoords[key], y: parseInt(e.target.value) || 0 } } })} className="w-full py-1 text-center font-bold text-sm outline-none bg-transparent" disabled={!certCoords[key]?.show}/></div>
                         </div>
                      </div>
                    ))}
