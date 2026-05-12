@@ -397,19 +397,33 @@ const App = () => {
     const updatedEntries = [...entries];
     
     events.forEach(event => {
-      const eventEntries = updatedEntries.filter(en => en.eventId === event.id);
+      let eventEntries = updatedEntries.filter(en => en.eventId === event.id);
       
-      // Mengurutkan dari Tercepat (misal 00:25.00) ke Terlambat (misal 99:99.99)
-      eventEntries.sort((a, b) => a.seedTime.localeCompare(b.seedTime));
+      // Pisahkan yang memiliki seed time dengan yang tidak (99:99.99 atau NT)
+      const noTimeEntries = eventEntries.filter(en => !en.seedTime || en.seedTime === '99:99.99' || en.seedTime.toLowerCase() === 'nt');
+      const seededEntries = eventEntries.filter(en => en.seedTime && en.seedTime !== '99:99.99' && en.seedTime.toLowerCase() !== 'nt');
+
+      // Acak urutan (shuffle) perenang yang tidak memiliki seed time
+      // Ini mencegah perenang dari sekolah yang sama menumpuk di heat pertama
+      for (let i = noTimeEntries.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [noTimeEntries[i], noTimeEntries[j]] = [noTimeEntries[j], noTimeEntries[i]];
+      }
+
+      // Urutkan perenang yang memiliki seed time dari tercepat (waktu terkecil) ke terlambat
+      seededEntries.sort((a, b) => a.seedTime.localeCompare(b.seedTime));
+
+      // Gabungkan kembali: Yang tercepat di awal array, yang tanpa seed time (diacak) di akhir array
+      eventEntries = [...seededEntries, ...noTimeEntries];
 
       const totalSwimmers = eventEntries.length;
       if (totalSwimmers === 0) return;
 
       const numHeats = Math.ceil(totalSwimmers / laneCount);
 
+      // Algoritma Seeding (Mengisi dari heat terakhir/tercepat mundur ke heat pertama)
       eventEntries.forEach((entry, index) => {
-        // Karena di-sort dari tercepat ke terlambat, index 0, 1, 2 (yang tercepat)
-        // akan mengisi heat akhir secara penuh.
+        // Index 0, 1, 2 (tercepat) akan mengisi heat terakhir
         const heatIndexFromEnd = Math.floor(index / laneCount);
         const heatNum = numHeats - heatIndexFromEnd;
         
@@ -423,12 +437,17 @@ const App = () => {
             if(center - l >= 1) lanes.push(center - l);
         }
         
-        entry.heat = heatNum;
-        entry.lane = lanes[indexInHeat];
+        // Update data entry di array referensi asli
+        const targetEntry = updatedEntries.find(e => e.id === entry.id);
+        if (targetEntry) {
+            targetEntry.heat = heatNum;
+            targetEntry.lane = lanes[indexInHeat];
+        }
       });
     });
+    
     updateActiveMeet({ entries: updatedEntries, isSeeded: true });
-    showDialog('Seeding Selesai', `Seeding FINA untuk kolam ${laneCount} lintasan telah berhasil di-generate!\n(Heat paling akhir telah diisi penuh)`, 'success');
+    showDialog('Seeding Selesai', `Seeding FINA untuk kolam ${laneCount} lintasan telah berhasil di-generate!\n(Perenang tanpa seed time telah diacak)`, 'success');
   };
 
   const moveEntry = (entryId, newHeat, newLane) => {
