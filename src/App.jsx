@@ -112,7 +112,7 @@ const App = () => {
   const [importProgress, setImportProgress] = useState(''); 
   const [entryMode, setEntryMode] = useState('individual');
   const [showExportModal, setShowExportModal] = useState(false);
-  const [exportFilterTeam, setExportFilterTeam] = useState('ALL');
+  const [exportMode, setExportMode] = useState('overall'); // 'overall' | 'per_team'
 
   const activeMeet = meets.find(m => m.id === activeMeetId) || {};
   
@@ -387,7 +387,7 @@ const App = () => {
     const isRelayMode = entryMode === 'relay';
     const existingEntry = entries.find(en => en.eventId === eventId && (isRelayMode ? en.teamId === selectedEntryEntity.id : en.swimmerId === selectedEntryEntity.id));
     if (existingEntry) {
-       updateActiveMeet({ entries: entries.map(en => en.id === existingEntry.id ? { ...en, seedTime: formatTime(newSeedTime) } : en) });
+      updateActiveMeet({ entries: entries.map(en => en.id === existingEntry.id ? { ...en, seedTime: formatTime(newSeedTime) } : en) });
     }
   };
 
@@ -519,20 +519,20 @@ const App = () => {
     swimmers.forEach(s => stats[s.id] = { ...s, gold: 0, silver: 0, bronze: 0, points: 0 });
     entries.forEach(en => {
       if (en.swimmerId && stats[en.swimmerId] && !en.status) {
-         if (en.pl === 1) stats[en.swimmerId].gold++;
-         if (en.pl === 2) stats[en.swimmerId].silver++;
-         if (en.pl === 3) stats[en.swimmerId].bronze++;
-         stats[en.swimmerId].points += (en[pointKey] || 0);
+        if (en.pl === 1) stats[en.swimmerId].gold++;
+        if (en.pl === 2) stats[en.swimmerId].silver++;
+        if (en.pl === 3) stats[en.swimmerId].bronze++;
+        stats[en.swimmerId].points += (en[pointKey] || 0);
       }
     });
     const grouped = {};
     Object.values(stats).forEach(s => {
-       const key = `${s.category} - ${s.gender}`;
-       if (!grouped[key]) grouped[key] = [];
-       grouped[key].push(s);
+      const key = `${s.category} - ${s.gender}`;
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(s);
     });
     Object.keys(grouped).forEach(k => {
-       grouped[k].sort((a,b) => b.gold - a.gold || b.silver - a.silver || b.bronze - a.bronze || b.points - a.points);
+      grouped[k].sort((a,b) => b.gold - a.gold || b.silver - a.silver || b.bronze - a.bronze || b.points - a.points);
     });
     return grouped;
   }, [swimmers, entries, leaderboardMode]);
@@ -657,112 +657,210 @@ const App = () => {
     } catch (error) { showDialog("Error", "Gagal men-generate PDF. Pastikan internet aktif.", "error"); } finally { setIsImportingSwimmers(false); setImportProgress(''); }
   };
 
-  const handleExportPsychSheet = async (teamId, format) => {
+  const handleExportPsychSheet = async (mode, format) => {
     setIsImportingSwimmers(true);
     setImportProgress(`Men-generate ${format.toUpperCase()}...`);
     setShowExportModal(false);
 
     try {
-      const docTitle = teamId === 'ALL' ? 'Psych Sheet (Keseluruhan)' : `Entry List - ${teams.find(t=>t.id===teamId)?.name}`;
-
       if (format === 'xlsx') {
         const XLSX = await loadXlsx();
-        const aoa = [[meetInfo.name.toUpperCase()], [docTitle], []];
+        const wb = XLSX.utils.book_new();
 
-        events.forEach((ev, eIdx) => {
-          let evEntries = entries.filter(en => en.eventId === ev.id);
-          if (teamId !== 'ALL') {
-            evEntries = evEntries.filter(en => {
-              if (en.teamId === teamId) return true;
+        if (mode === 'overall') {
+          const aoa = [[meetInfo.name.toUpperCase()], ['Psych Sheet (Keseluruhan)'], []];
+          events.forEach((ev, eIdx) => {
+            let evEntries = entries.filter(en => en.eventId === ev.id);
+            if (evEntries.length === 0) return;
+            evEntries.sort((a, b) => a.seedTime.localeCompare(b.seedTime));
+
+            aoa.push([`Event ${eIdx + 1} - ${ev.name}`]);
+            aoa.push(['Rank', 'Name/Team', 'Age', 'Team', 'Seed Time']);
+
+            evEntries.forEach((en, rank) => {
+              const name = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.name.toUpperCase() : teams.find(t => t.id === en.teamId)?.name.toUpperCase() + ' (A)';
+              const age = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.age?.toString() : '';
+              const org = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.abbr.toUpperCase() : teams.find(t => t.id === en.teamId)?.abbr.toUpperCase();
+              const seed = (en.seedTime === '99:99.99' || !en.seedTime) ? 'NT' : en.seedTime;
+              aoa.push([rank + 1, name || '', age || '', org || '', seed]);
+            });
+            aoa.push([]);
+          });
+          const ws = XLSX.utils.aoa_to_sheet(aoa);
+          ws['!cols'] = [{wch: 8}, {wch: 40}, {wch: 8}, {wch: 15}, {wch: 15}];
+          XLSX.utils.book_append_sheet(wb, ws, "Psych Sheet");
+        } else {
+          // Per Team
+          teams.forEach(team => {
+            const teamEntries = entries.filter(en => {
+              if (en.teamId === team.id) return true;
               if (en.swimmerId) {
                 const sw = swimmers.find(s => s.id === en.swimmerId);
-                return sw && sw.teamId === teamId;
+                return sw && sw.teamId === team.id;
               }
               return false;
             });
-          }
 
-          if (evEntries.length === 0) return;
+            if (teamEntries.length === 0) return;
 
-          evEntries.sort((a, b) => a.seedTime.localeCompare(b.seedTime));
+            // Sort entries by Event Index
+            teamEntries.sort((a, b) => {
+              const eA = events.findIndex(e => e.id === a.eventId);
+              const eB = events.findIndex(e => e.id === b.eventId);
+              return eA - eB;
+            });
 
-          aoa.push([`Event ${eIdx + 1} - ${ev.name}`]);
-          aoa.push(['Rank', 'Name/Team', 'Age', 'Team', 'Seed Time']);
+            const aoa = [[meetInfo.name.toUpperCase()], [`Entry List - ${team.name}`], []];
+            aoa.push(['Event', 'Nama Atlet / Estafet', 'Kategori', 'Gender', 'Seed Time']);
 
-          evEntries.forEach((en, rank) => {
-            const name = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.name.toUpperCase() : teams.find(t => t.id === en.teamId)?.name.toUpperCase() + ' (A)';
-            const age = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.age?.toString() : '';
-            const org = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.abbr.toUpperCase() : teams.find(t => t.id === en.teamId)?.abbr.toUpperCase();
-            const seed = (en.seedTime === '99:99.99' || !en.seedTime) ? 'NT' : en.seedTime;
+            teamEntries.forEach(en => {
+              const ev = events.find(e => e.id === en.eventId);
+              const eventName = ev ? `Evt ${events.indexOf(ev) + 1}: ${ev.distance}m ${ev.stroke}` : '';
+              const name = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.name.toUpperCase() : team.name.toUpperCase() + ' (A)';
+              const cat = ev ? ev.category : '';
+              const gen = ev ? ev.gender : '';
+              const seed = (en.seedTime === '99:99.99' || !en.seedTime) ? 'NT' : en.seedTime;
+              aoa.push([eventName, name || '', cat, gen, seed]);
+            });
 
-            aoa.push([rank + 1, name || '', age || '', org || '', seed]);
+            const ws = XLSX.utils.aoa_to_sheet(aoa);
+            ws['!cols'] = [{wch: 25}, {wch: 40}, {wch: 15}, {wch: 10}, {wch: 15}];
+            
+            // Handle duplicate sheet names or too long
+            let sheetName = team.abbr.replace(/[^a-zA-Z0-9]/g, '').substring(0, 31);
+            if (!sheetName) sheetName = "Team";
+            
+            let counter = 1;
+            let finalSheetName = sheetName;
+            while(wb.SheetNames.includes(finalSheetName)) {
+               finalSheetName = `${sheetName.substring(0, 28)}_${counter}`;
+               counter++;
+            }
+            
+            XLSX.utils.book_append_sheet(wb, ws, finalSheetName);
           });
-          aoa.push([]);
-        });
+          
+          if(wb.SheetNames.length === 0) {
+             const ws = XLSX.utils.aoa_to_sheet([["Tidak ada data"]]);
+             XLSX.utils.book_append_sheet(wb, ws, "Kosong");
+          }
+        }
 
-        const ws = XLSX.utils.aoa_to_sheet(aoa);
-        ws['!cols'] = [{wch: 8}, {wch: 40}, {wch: 8}, {wch: 15}, {wch: 15}];
-        const wb = XLSX.utils.book_new();
-        XLSX.utils.book_append_sheet(wb, ws, "Psych Sheet");
-        XLSX.writeFile(wb, `Psych_Sheet_${meetInfo.name.replace(/\s+/g, '_')}.xlsx`);
-        showDialog("Sukses", `Excel Psych Sheet berhasil dibuat!`, "success");
+        XLSX.writeFile(wb, `${mode === 'overall' ? 'Psych_Sheet' : 'Entry_List_Per_Tim'}_${meetInfo.name.replace(/\s+/g, '_')}.xlsx`);
+        showDialog("Sukses", `Excel berhasil dibuat!`, "success");
 
       } else {
+        // PDF Export
         const jsPDF = await loadJsPDF();
         const doc = new jsPDF();
         let finalY = 20;
+        let hasData = false;
 
-        doc.setFontSize(14); doc.setFont("helvetica", "bold");
-        doc.text(meetInfo.name.toUpperCase(), 105, finalY, { align: "center" });
-        finalY += 6;
-        doc.setFontSize(11); doc.setFont("helvetica", "normal");
-        doc.text(docTitle, 105, finalY, { align: "center" });
-        finalY += 15;
+        if (mode === 'overall') {
+          doc.setFontSize(14); doc.setFont("helvetica", "bold");
+          doc.text(meetInfo.name.toUpperCase(), 105, finalY, { align: "center" });
+          finalY += 6;
+          doc.setFontSize(11); doc.setFont("helvetica", "normal");
+          doc.text('Psych Sheet (Keseluruhan)', 105, finalY, { align: "center" });
+          finalY += 15;
 
-        events.forEach((ev, eIdx) => {
-          let evEntries = entries.filter(en => en.eventId === ev.id);
-          if (teamId !== 'ALL') {
-            evEntries = evEntries.filter(en => {
-              if (en.teamId === teamId) return true;
+          events.forEach((ev, eIdx) => {
+            let evEntries = entries.filter(en => en.eventId === ev.id);
+            if (evEntries.length === 0) return;
+            hasData = true;
+
+            evEntries.sort((a, b) => a.seedTime.localeCompare(b.seedTime));
+
+            if (finalY > 260) { doc.addPage(); finalY = 20; }
+
+            doc.setFontSize(11); doc.setFont("helvetica", "bold");
+            doc.text(`Event ${eIdx + 1} - ${ev.name}`, 14, finalY);
+            finalY += 2;
+
+            const tableData = evEntries.map((en, rank) => {
+              const name = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.name.toUpperCase() : teams.find(t => t.id === en.teamId)?.name.toUpperCase() + ' (A)';
+              const age = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.age?.toString() : '';
+              const org = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.abbr.toUpperCase() : teams.find(t => t.id === en.teamId)?.abbr.toUpperCase();
+              const seed = (en.seedTime === '99:99.99' || !en.seedTime) ? 'NT' : en.seedTime;
+              return [rank + 1, name || '', age || '', org || '', seed];
+            });
+
+            doc.autoTable({
+              startY: finalY,
+              head: [['Rank', 'Name/Team', 'Age', 'Team', 'Seed Time']],
+              body: tableData,
+              theme: 'plain',
+              styles: { fontSize: 9, cellPadding: 1 },
+              headStyles: { fontStyle: 'bold', lineWidth: { bottom: 0.5 }, lineColor: [0, 0, 0] },
+              columnStyles: { 0: { cellWidth: 15, halign: 'center' }, 1: { cellWidth: 80 }, 2: { cellWidth: 15, halign: 'center' }, 3: { cellWidth: 30 }, 4: { cellWidth: 30, halign: 'center' } },
+              didDrawPage: function (data) { finalY = data.cursor.y; }
+            });
+            finalY = doc.lastAutoTable.finalY + 10;
+          });
+        } else {
+          // Per Team PDF
+          let isFirstTeam = true;
+          teams.forEach(team => {
+            const teamEntries = entries.filter(en => {
+              if (en.teamId === team.id) return true;
               if (en.swimmerId) {
                 const sw = swimmers.find(s => s.id === en.swimmerId);
-                return sw && sw.teamId === teamId;
+                return sw && sw.teamId === team.id;
               }
               return false;
             });
-          }
 
-          if (evEntries.length === 0) return;
+            if (teamEntries.length === 0) return;
+            hasData = true;
 
-          evEntries.sort((a, b) => a.seedTime.localeCompare(b.seedTime));
+            if (!isFirstTeam) {
+              doc.addPage();
+              finalY = 20;
+            }
+            isFirstTeam = false;
 
-          if (finalY > 260) { doc.addPage(); finalY = 20; }
+            doc.setFontSize(14); doc.setFont("helvetica", "bold");
+            doc.text(meetInfo.name.toUpperCase(), 105, finalY, { align: "center" });
+            finalY += 6;
+            doc.setFontSize(11); doc.setFont("helvetica", "normal");
+            doc.text(`Entry List - ${team.name}`, 105, finalY, { align: "center" });
+            finalY += 15;
 
-          doc.setFontSize(11); doc.setFont("helvetica", "bold");
-          doc.text(`Event ${eIdx + 1} - ${ev.name}`, 14, finalY);
-          finalY += 2;
+            // Sort entries by Event Index
+            teamEntries.sort((a, b) => {
+              const eA = events.findIndex(e => e.id === a.eventId);
+              const eB = events.findIndex(e => e.id === b.eventId);
+              return eA - eB;
+            });
 
-          const tableData = evEntries.map((en, rank) => {
-            const name = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.name.toUpperCase() : teams.find(t => t.id === en.teamId)?.name.toUpperCase() + ' (A)';
-            const age = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.age?.toString() : '';
-            const org = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.abbr.toUpperCase() : teams.find(t => t.id === en.teamId)?.abbr.toUpperCase();
-            const seed = (en.seedTime === '99:99.99' || !en.seedTime) ? 'NT' : en.seedTime;
+            const tableData = teamEntries.map(en => {
+              const ev = events.find(e => e.id === en.eventId);
+              const eventName = ev ? `Evt ${events.indexOf(ev) + 1}: ${ev.distance}m ${ev.stroke}` : '';
+              const name = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.name.toUpperCase() : team.name.toUpperCase() + ' (A)';
+              const cat = ev ? ev.category : '';
+              const gen = ev ? ev.gender : '';
+              const seed = (en.seedTime === '99:99.99' || !en.seedTime) ? 'NT' : en.seedTime;
+              return [eventName, name || '', cat, gen, seed];
+            });
 
-            return [rank + 1, name || '', age || '', org || '', seed];
+            doc.autoTable({
+              startY: finalY,
+              head: [['Event', 'Nama Atlet / Estafet', 'Kategori', 'Gender', 'Seed Time']],
+              body: tableData,
+              theme: 'plain',
+              styles: { fontSize: 9, cellPadding: 1 },
+              headStyles: { fontStyle: 'bold', lineWidth: { bottom: 0.5 }, lineColor: [0, 0, 0] },
+              columnStyles: { 0: { cellWidth: 40 }, 1: { cellWidth: 70 }, 2: { cellWidth: 25 }, 3: { cellWidth: 20 }, 4: { cellWidth: 25, halign: 'center' } },
+              didDrawPage: function (data) { finalY = data.cursor.y; }
+            });
+            finalY = doc.lastAutoTable.finalY + 10;
           });
+        }
 
-          doc.autoTable({
-            startY: finalY,
-            head: [['Rank', 'Name/Team', 'Age', 'Team', 'Seed Time']],
-            body: tableData,
-            theme: 'plain',
-            styles: { fontSize: 9, cellPadding: 1 },
-            headStyles: { fontStyle: 'bold', lineWidth: { bottom: 0.5 }, lineColor: [0, 0, 0] },
-            columnStyles: { 0: { cellWidth: 15, halign: 'center' }, 1: { cellWidth: 80 }, 2: { cellWidth: 15, halign: 'center' }, 3: { cellWidth: 30 }, 4: { cellWidth: 30, halign: 'center' } },
-            didDrawPage: function (data) { finalY = data.cursor.y; }
-          });
-          finalY = doc.lastAutoTable.finalY + 10;
-        });
+        if (!hasData) {
+            doc.setFontSize(11);
+            doc.text("Tidak ada data pendaftaran yang ditemukan.", 105, 50, { align: "center" });
+        }
 
         const pageCount = doc.internal.getNumberOfPages();
         const printStamp = `Generated at ${new Date().toLocaleString('id-ID')}`;
@@ -771,8 +869,8 @@ const App = () => {
           doc.text(printStamp, 14, 10); doc.text(`Halaman ${i}`, 196, 10, { align: "right" });
         }
 
-        doc.save(`Psych_Sheet_${meetInfo.name.replace(/\s+/g, '_')}.pdf`);
-        showDialog("Sukses", `PDF Psych Sheet berhasil dibuat!`, "success");
+        doc.save(`${mode === 'overall' ? 'Psych_Sheet' : 'Entry_List_Per_Tim'}_${meetInfo.name.replace(/\s+/g, '_')}.pdf`);
+        showDialog("Sukses", `PDF berhasil dibuat!`, "success");
       }
     } catch (err) {
       console.error(err);
@@ -815,8 +913,8 @@ const App = () => {
           const org = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.org.toUpperCase() : teams.find(t => t.id === en.teamId)?.abbr.toUpperCase();
           const row = [ en.status ? en.status : (en.pl || '-'), name || '', age || '', org || '', en.seedTime || 'NT', en.status ? en.status : en.resultTime ];
           if (includePoints) {
-             const pts = leaderboardMode === 'standard' ? en.standardPoints : en.alternativePoints;
-             row.push(pts > 0 ? pts : '-');
+            const pts = leaderboardMode === 'standard' ? en.standardPoints : en.alternativePoints;
+            row.push(pts > 0 ? pts : '-');
           }
           aoa.push(row);
         });
@@ -844,7 +942,7 @@ const App = () => {
         const org = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.org.toUpperCase() : teams.find(t => t.id === en.teamId)?.abbr.toUpperCase();
         const row = [ en.status ? en.status : (en.pl || '-'), name || '', age || '', org || '', en.seedTime || 'NT', en.status ? en.status : en.resultTime ];
         if (includePoints) {
-           const pts = leaderboardMode === 'standard' ? en.standardPoints : en.alternativePoints; row.push(pts > 0 ? pts.toString() : '-');
+          const pts = leaderboardMode === 'standard' ? en.standardPoints : en.alternativePoints; row.push(pts > 0 ? pts.toString() : '-');
         }
         return row;
       });
@@ -879,9 +977,9 @@ const App = () => {
       title: 'Pilih Format Export', message: 'Anda ingin menyimpan laporan hasil lomba ini dalam format apa?', type: 'info',
       customActions: (
         <div className="flex flex-col gap-3 w-full">
-           <button onClick={() => { closeDialog(); exportEventResult(eventId, includePoints, 'pdf'); }} className="w-full px-6 py-4 rounded-xl font-black uppercase bg-red-600 text-white hover:bg-red-700 shadow-sm transition active:scale-95 text-sm tracking-widest flex items-center justify-center gap-2"><FileText size={18}/> Format PDF (Siap Cetak)</button>
-           <button onClick={() => { closeDialog(); exportEventResult(eventId, includePoints, 'xlsx'); }} className="w-full px-6 py-4 rounded-xl font-black uppercase bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm transition active:scale-95 text-sm tracking-widest flex items-center justify-center gap-2"><Layout size={18}/> Format Excel (.XLSX)</button>
-           <button onClick={closeDialog} className="w-full mt-2 px-6 py-3 rounded-xl font-black uppercase text-slate-500 hover:bg-slate-100 transition text-sm">Batal</button>
+          <button onClick={() => { closeDialog(); exportEventResult(eventId, includePoints, 'pdf'); }} className="w-full px-6 py-4 rounded-xl font-black uppercase bg-red-600 text-white hover:bg-red-700 shadow-sm transition active:scale-95 text-sm tracking-widest flex items-center justify-center gap-2"><FileText size={18}/> Format PDF (Siap Cetak)</button>
+          <button onClick={() => { closeDialog(); exportEventResult(eventId, includePoints, 'xlsx'); }} className="w-full px-6 py-4 rounded-xl font-black uppercase bg-emerald-600 text-white hover:bg-emerald-700 shadow-sm transition active:scale-95 text-sm tracking-widest flex items-center justify-center gap-2"><Layout size={18}/> Format Excel (.XLSX)</button>
+          <button onClick={closeDialog} className="w-full mt-2 px-6 py-3 rounded-xl font-black uppercase text-slate-500 hover:bg-slate-100 transition text-sm">Batal</button>
         </div>
       )
     });
@@ -1127,18 +1225,18 @@ const App = () => {
         const kuNames = matchedKUs.map(ku => ku.name); const kuNameDisplay = kuNames.join(', ');
 
         if (eventStr) {
-           const distMatch = eventStr.match(/\d+/);
-           if (!distMatch) { missingEventCount++; unmatchedEventsList.add(`- ${eventStr} (Jarak tidak terbaca)`); continue; }
-           const distance = distMatch[0]; const strokeMatch = eventStr.toLowerCase().replace(distance, '').replace(/meter|meters/g, '').replace(/^m\s*/, '').replace(/putra|putri|mix/gi, '').trim();
+          const distMatch = eventStr.match(/\d+/);
+          if (!distMatch) { missingEventCount++; unmatchedEventsList.add(`- ${eventStr} (Jarak tidak terbaca)`); continue; }
+          const distance = distMatch[0]; const strokeMatch = eventStr.toLowerCase().replace(distance, '').replace(/meter|meters/g, '').replace(/^m\s*/, '').replace(/putra|putri|mix/gi, '').trim();
 
-           const matchedEvent = events.find(ev => {
-             const strokeIsMatch = ev.stroke.toLowerCase().includes(strokeMatch) || strokeMatch.includes(ev.stroke.toLowerCase());
-             const genderIsMatch = ev.gender.toLowerCase() === genderStr.toLowerCase() || ev.gender.toLowerCase() === 'mix';
-             return ev.distance === distance && strokeIsMatch && genderIsMatch && kuNames.includes(ev.category) && ev.type === 'Individual';
-           });
+          const matchedEvent = events.find(ev => {
+            const strokeIsMatch = ev.stroke.toLowerCase().includes(strokeMatch) || strokeMatch.includes(ev.stroke.toLowerCase());
+            const genderIsMatch = ev.gender.toLowerCase() === genderStr.toLowerCase() || ev.gender.toLowerCase() === 'mix';
+            return ev.distance === distance && strokeIsMatch && genderIsMatch && kuNames.includes(ev.category) && ev.type === 'Individual';
+          });
 
-           if (!matchedEvent) { missingEventCount++; unmatchedEventsList.add(`- ${eventStr} (${genderStr} - ${kuNameDisplay})`); continue; }
-           validRows.push({ nameStr, orgStr, abbrStr, distStr, gradeStr, genderStr, dobStr, age, kuNameDisplay, matchedEvent, seedStr, i });
+          if (!matchedEvent) { missingEventCount++; unmatchedEventsList.add(`- ${eventStr} (${genderStr} - ${kuNameDisplay})`); continue; }
+          validRows.push({ nameStr, orgStr, abbrStr, distStr, gradeStr, genderStr, dobStr, age, kuNameDisplay, matchedEvent, seedStr, i });
         }
       }
 
@@ -1149,9 +1247,9 @@ const App = () => {
       for (const validData of validRows) {
         let team = teamMap.get(validData.orgStr.toLowerCase()) || teamMap.get(validData.abbrStr.toLowerCase());
         if (!team) {
-           team = { id: 'tm-' + Date.now() + '-' + validData.i, name: validData.orgStr, abbr: validData.abbrStr };
-           teamMap.set(validData.orgStr.toLowerCase(), team); teamMap.set(validData.abbrStr.toLowerCase(), team);
-           newTeamsToAdd.push(team); tempTeams.push(team);
+          team = { id: 'tm-' + Date.now() + '-' + validData.i, name: validData.orgStr, abbr: validData.abbrStr };
+          teamMap.set(validData.orgStr.toLowerCase(), team); teamMap.set(validData.abbrStr.toLowerCase(), team);
+          newTeamsToAdd.push(team); tempTeams.push(team);
         }
 
         const swimmerKey = `${validData.nameStr.toLowerCase()}|${validData.dobStr}`; let swimmer = swimmerMap.get(swimmerKey);
@@ -1222,26 +1320,26 @@ const App = () => {
       <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[9999] flex items-center justify-center p-6 animate-in fade-in">
         <div className="bg-white w-full max-w-lg rounded-[2rem] p-8 shadow-2xl animate-in zoom-in-95 border border-slate-100 flex flex-col max-h-[90vh]">
           <div className="flex items-center gap-4 mb-6 shrink-0">
-             {dialog.type === 'error' && <div className="bg-red-100 text-red-600 p-3 rounded-full"><XCircle size={28}/></div>}
-             {dialog.type === 'success' && <div className="bg-green-100 text-green-600 p-3 rounded-full"><CheckCircle size={28}/></div>}
-             {dialog.type === 'warning' && <div className="bg-orange-100 text-orange-600 p-3 rounded-full"><AlertCircle size={28}/></div>}
-             {dialog.type === 'info' && <div className="bg-blue-100 text-blue-600 p-3 rounded-full"><AlertCircle size={28}/></div>}
-             <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight leading-tight">{dialog.title}</h3>
+            {dialog.type === 'error' && <div className="bg-red-100 text-red-600 p-3 rounded-full"><XCircle size={28}/></div>}
+            {dialog.type === 'success' && <div className="bg-green-100 text-green-600 p-3 rounded-full"><CheckCircle size={28}/></div>}
+            {dialog.type === 'warning' && <div className="bg-orange-100 text-orange-600 p-3 rounded-full"><AlertCircle size={28}/></div>}
+            {dialog.type === 'info' && <div className="bg-blue-100 text-blue-600 p-3 rounded-full"><AlertCircle size={28}/></div>}
+            <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight leading-tight">{dialog.title}</h3>
           </div>
           <div className="text-sm font-bold text-slate-600 whitespace-pre-wrap flex-1 overflow-y-auto pr-2 leading-relaxed">{dialog.message}</div>
           {dialog.customActions ? (
-             <div className="mt-8 pt-4 flex shrink-0 border-t border-slate-100 justify-center">{dialog.customActions}</div>
+            <div className="mt-8 pt-4 flex shrink-0 border-t border-slate-100 justify-center">{dialog.customActions}</div>
           ) : (
-             <div className="mt-8 pt-4 flex gap-3 shrink-0 border-t border-slate-100 justify-end">
-               {dialog.onConfirm ? (
+            <div className="mt-8 pt-4 flex gap-3 shrink-0 border-t border-slate-100 justify-end">
+              {dialog.onConfirm ? (
                   <>
                     <button onClick={closeDialog} className="px-6 py-3 rounded-xl font-black uppercase text-slate-500 hover:bg-slate-100 transition text-sm">Batal</button>
                     <button onClick={() => { dialog.onConfirm(); closeDialog(); }} className="px-6 py-3 rounded-xl font-black uppercase bg-red-600 text-white hover:bg-red-700 shadow-lg shadow-red-200 transition active:scale-95 text-sm">Ya, Lanjutkan</button>
                   </>
-               ) : (
+              ) : (
                   <button onClick={closeDialog} className="w-full px-6 py-4 rounded-2xl font-black uppercase bg-slate-900 text-white hover:bg-black shadow-lg shadow-slate-300 transition active:scale-95 text-sm tracking-widest">Tutup / Mengerti</button>
-               )}
-             </div>
+              )}
+            </div>
           )}
         </div>
       </div>
@@ -1289,18 +1387,18 @@ const App = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {sortedRecords.map((rec, idx) => (
               <div key={idx} className="bg-slate-50 border border-slate-200 rounded-2xl p-6 flex flex-col justify-between hover:border-indigo-300 hover:shadow-md transition-all group">
-                 <div className="flex justify-between items-start mb-4">
+                <div className="flex justify-between items-start mb-4">
                     <div className="bg-indigo-100 text-indigo-700 font-black uppercase text-[10px] px-3 py-1 rounded-md tracking-widest border border-indigo-200">{rec.eventKey} • {rec.gender}</div>
                     <Medal className="text-slate-300 group-hover:text-yellow-500 transition-colors" size={24}/>
-                 </div>
-                 <div>
-                   <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight">{rec.swimmerName}</h3>
-                   <div className="text-xs font-bold text-slate-500 mt-1 uppercase flex items-center gap-2"><span>{rec.org}</span><span className="bg-white border border-slate-200 px-2 py-0.5 rounded text-[9px] shadow-sm">[{rec.abbr}]</span></div>
-                 </div>
-                 <div className="mt-6 flex justify-between items-end border-t border-slate-200 pt-4">
+                </div>
+                <div>
+                  <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight">{rec.swimmerName}</h3>
+                  <div className="text-xs font-bold text-slate-500 mt-1 uppercase flex items-center gap-2"><span>{rec.org}</span><span className="bg-white border border-slate-200 px-2 py-0.5 rounded text-[9px] shadow-sm">[{rec.abbr}]</span></div>
+                </div>
+                <div className="mt-6 flex justify-between items-end border-t border-slate-200 pt-4">
                     <div className="text-[10px] text-slate-400 font-medium max-w-[150px] leading-tight">Dicetak pada:<br/><span className="font-bold text-slate-600">{rec.meetName}</span></div>
                     <div className="text-right"><span className="block text-[10px] font-black uppercase tracking-widest text-indigo-400 mb-1">Rekor Waktu</span><span className="text-3xl font-mono font-black text-indigo-700 tracking-tighter leading-none">{rec.timeStr}</span></div>
-                 </div>
+                </div>
               </div>
             ))}
             {sortedRecords.length === 0 && (
@@ -1349,27 +1447,27 @@ const App = () => {
           </div>
           <div className="divide-y divide-slate-100">
             {meets.map(meet => {
-               const meetStatus = meet.isSeeded ? 'Seeded' : 'Preparation';
-               return (
-                 <div key={meet.id} className="grid grid-cols-12 p-5 items-center hover:bg-slate-50 transition group">
-                   <div className="col-span-4">
-                     <h3 className="font-black text-lg text-slate-800">{meet.meetInfo.name}</h3>
-                     <div className="text-[10px] text-slate-400 font-bold uppercase mt-1 flex items-center gap-2"><span>ID: {meet.id.split('-')[1]}</span><span className="bg-slate-100 px-2 py-0.5 rounded text-slate-600">PIN Admin: {meet.adminPin}</span></div>
-                   </div>
-                   <div className="col-span-3 text-center">
-                     <div className="font-bold text-slate-700 flex items-center justify-center gap-1"><Clock size={14}/> {meet.meetInfo.date}</div>
-                     <div className="text-xs text-slate-500 flex items-center justify-center gap-1 mt-1"><Database size={12}/> {meet.meetInfo.location}</div>
-                   </div>
-                   <div className="col-span-2 text-center">
-                     <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${meet.isSeeded ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>{meetStatus}</span>
-                     <div className="text-[10px] text-slate-400 font-bold mt-2 uppercase">{meet.swimmers.length} Atlet • {meet.events.length} Lomba</div>
-                   </div>
-                   <div className="col-span-3 flex justify-end gap-3">
-                     <button onClick={() => deleteMeet(meet.id)} className="text-red-400 hover:text-red-600 p-2 hover:bg-red-50 rounded-lg transition"><Trash2 size={20}/></button>
-                     <button onClick={() => { setActiveMeetId(meet.id); setActiveTab('dashboard'); }} className="bg-blue-50 text-blue-600 font-black text-xs uppercase px-5 py-2.5 rounded-xl hover:bg-blue-600 hover:text-white transition shadow-sm border border-blue-100">Kelola Lomba</button>
-                   </div>
-                 </div>
-               )
+              const meetStatus = meet.isSeeded ? 'Seeded' : 'Preparation';
+              return (
+                <div key={meet.id} className="grid grid-cols-12 p-5 items-center hover:bg-slate-50 transition group">
+                  <div className="col-span-4">
+                    <h3 className="font-black text-lg text-slate-800">{meet.meetInfo.name}</h3>
+                    <div className="text-[10px] text-slate-400 font-bold uppercase mt-1 flex items-center gap-2"><span>ID: {meet.id.split('-')[1]}</span><span className="bg-slate-100 px-2 py-0.5 rounded text-slate-600">PIN Admin: {meet.adminPin}</span></div>
+                  </div>
+                  <div className="col-span-3 text-center">
+                    <div className="font-bold text-slate-700 flex items-center justify-center gap-1"><Clock size={14}/> {meet.meetInfo.date}</div>
+                    <div className="text-xs text-slate-500 flex items-center justify-center gap-1 mt-1"><Database size={12}/> {meet.meetInfo.location}</div>
+                  </div>
+                  <div className="col-span-2 text-center">
+                    <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${meet.isSeeded ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>{meetStatus}</span>
+                    <div className="text-[10px] text-slate-400 font-bold mt-2 uppercase">{meet.swimmers.length} Atlet • {meet.events.length} Lomba</div>
+                  </div>
+                  <div className="col-span-3 flex justify-end gap-3">
+                    <button onClick={() => deleteMeet(meet.id)} className="text-red-400 hover:text-red-600 p-2 hover:bg-red-50 rounded-lg transition"><Trash2 size={20}/></button>
+                    <button onClick={() => { setActiveMeetId(meet.id); setActiveTab('dashboard'); }} className="bg-blue-50 text-blue-600 font-black text-xs uppercase px-5 py-2.5 rounded-xl hover:bg-blue-600 hover:text-white transition shadow-sm border border-blue-100">Kelola Lomba</button>
+                  </div>
+                </div>
+              )
             })}
             {meets.length === 0 && <div className="p-16 text-center text-slate-400"><Trophy size={48} className="mx-auto mb-4 opacity-50"/><p className="font-bold text-lg">Belum ada perlombaan yang dibuat.</p></div>}
           </div>
@@ -1419,7 +1517,7 @@ const App = () => {
                 <input className="w-full p-3 bg-slate-50 border rounded-xl font-bold focus:border-blue-500 outline-none" value={meetInfo.name} onChange={(e) => updateActiveMeet({ meetInfo: {...meetInfo, name: e.target.value} })} />
               </div>
               <div className="grid grid-cols-2 gap-4">
-                 <div>
+                <div>
                   <label className="text-[10px] font-black text-slate-400 uppercase ml-1 block mb-1">Tanggal</label>
                   <input type="date" className="w-full p-3 bg-slate-50 border rounded-xl font-bold focus:border-blue-500 outline-none" value={meetInfo.date} onChange={(e) => updateActiveMeet({ meetInfo: {...meetInfo, date: e.target.value} })} />
                 </div>
@@ -1520,39 +1618,39 @@ const App = () => {
     <div className="max-w-6xl mx-auto space-y-8 pb-20">
       <div className="bg-white p-10 rounded-[2.5rem] shadow-xl border-t-[10px] border-indigo-600">
         <div className="flex items-center gap-3 mb-8">
-           <Flag className="text-indigo-600" size={32}/>
-           <div>
-             <h2 className="text-3xl font-black text-slate-800 tracking-tighter uppercase leading-none">Registrasi Klub / Kontingen</h2>
-             <p className="text-slate-500 font-medium text-sm mt-1">Daftarkan tim sebelum memasukkan biodata atlet di tahap selanjutnya.</p>
-           </div>
+          <Flag className="text-indigo-600" size={32}/>
+          <div>
+            <h2 className="text-3xl font-black text-slate-800 tracking-tighter uppercase leading-none">Registrasi Klub / Kontingen</h2>
+            <p className="text-slate-500 font-medium text-sm mt-1">Daftarkan tim sebelum memasukkan biodata atlet di tahap selanjutnya.</p>
+          </div>
         </div>
 
         <form onSubmit={registerTeam} className="bg-indigo-50 p-6 rounded-2xl border border-indigo-100 grid grid-cols-1 md:grid-cols-12 gap-4 items-end mb-8">
-           <div className="md:col-span-7">
+          <div className="md:col-span-7">
               <label className="text-[10px] font-black uppercase text-indigo-700 block mb-1">Nama Lengkap Klub / Kontingen</label>
               <input value={teamForm.name} onChange={e => setTeamForm({...teamForm, name: e.target.value})} className="w-full p-4 bg-white border border-indigo-200 rounded-xl font-bold focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="Contoh: MILLENNIUM AQUATIC" required />
-           </div>
-           <div className="md:col-span-3">
+          </div>
+          <div className="md:col-span-3">
               <label className="text-[10px] font-black uppercase text-indigo-700 block mb-1">Singkatan (ABBR)</label>
               <input value={teamForm.abbr} onChange={e => setTeamForm({...teamForm, abbr: e.target.value})} className="w-full p-4 bg-white border border-indigo-200 rounded-xl font-black text-center uppercase focus:ring-2 focus:ring-indigo-500 outline-none placeholder:text-slate-300" placeholder="Otomatis" maxLength={5} />
-           </div>
-           <div className="md:col-span-2">
-             <button type="submit" className="w-full bg-indigo-600 text-white p-4 rounded-xl font-black uppercase hover:bg-indigo-700 shadow-md transition active:scale-95 h-[58px]">Tambah</button>
-           </div>
+          </div>
+          <div className="md:col-span-2">
+            <button type="submit" className="w-full bg-indigo-600 text-white p-4 rounded-xl font-black uppercase hover:bg-indigo-700 shadow-md transition active:scale-95 h-[58px]">Tambah</button>
+          </div>
         </form>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {teams.length === 0 && <div className="col-span-full text-center p-12 border-2 border-dashed border-slate-200 rounded-2xl text-slate-400 font-bold">Belum ada tim yang didaftarkan.</div>}
           {teams.map((t, idx) => (
             <div key={t.id} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between group hover:border-indigo-300 transition">
-               <div className="flex gap-4 items-center">
-                 <div className="bg-slate-100 w-10 h-10 rounded-xl flex items-center justify-center font-black text-slate-400">{idx+1}</div>
-                 <div>
-                   <h4 className="font-black text-slate-800 uppercase text-sm truncate max-w-[150px]" title={t.name}>{t.name}</h4>
-                   <span className="text-[10px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded font-black uppercase border border-indigo-100 mt-1 inline-block">[{t.abbr}]</span>
-                 </div>
-               </div>
-               <button onClick={() => deleteTeamFromMeet(t.id)} className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"><Trash2 size={18}/></button>
+              <div className="flex gap-4 items-center">
+                <div className="bg-slate-100 w-10 h-10 rounded-xl flex items-center justify-center font-black text-slate-400">{idx+1}</div>
+                <div>
+                  <h4 className="font-black text-slate-800 uppercase text-sm truncate max-w-[150px]" title={t.name}>{t.name}</h4>
+                  <span className="text-[10px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded font-black uppercase border border-indigo-100 mt-1 inline-block">[{t.abbr}]</span>
+                </div>
+              </div>
+              <button onClick={() => deleteTeamFromMeet(t.id)} className="text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition"><Trash2 size={18}/></button>
             </div>
           ))}
         </div>
@@ -1623,9 +1721,9 @@ const App = () => {
             </div>
 
             <div className="lg:col-span-4 flex items-end">
-               <button type="submit" className="w-full bg-blue-600 text-white p-5 rounded-2xl font-black text-lg shadow-lg hover:bg-blue-700 transition active:scale-95 uppercase tracking-widest h-[60px] mb-[2px]">
-                 Simpan Atlet
-               </button>
+              <button type="submit" className="w-full bg-blue-600 text-white p-5 rounded-2xl font-black text-lg shadow-lg hover:bg-blue-700 transition active:scale-95 uppercase tracking-widest h-[60px] mb-[2px]">
+                Simpan Atlet
+              </button>
             </div>
           </form>
         </div>
@@ -1634,11 +1732,11 @@ const App = () => {
           <div className="p-6 bg-slate-900 text-white flex flex-col md:flex-row md:items-center justify-between gap-4">
             <h3 className="font-black flex items-center gap-2 uppercase tracking-tighter"><Users size={20}/> Database Atlet Tersimpan</h3>
             <div className="flex items-center gap-4">
-               <div className="relative">
-                 <input value={athleteSearch} onChange={e => setAthleteSearch(e.target.value)} type="text" placeholder="Cari nama / klub..." className="w-64 bg-white/10 border border-white/20 rounded-xl p-2 pl-9 text-sm font-bold text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
-                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40"/>
-               </div>
-               <div className="bg-white/10 px-3 py-1.5 rounded-lg text-xs font-bold shrink-0">{filteredAthletes.length} / {swimmers.length} Atlet</div>
+              <div className="relative">
+                <input value={athleteSearch} onChange={e => setAthleteSearch(e.target.value)} type="text" placeholder="Cari nama / klub..." className="w-64 bg-white/10 border border-white/20 rounded-xl p-2 pl-9 text-sm font-bold text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" />
+                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40"/>
+              </div>
+              <div className="bg-white/10 px-3 py-1.5 rounded-lg text-xs font-bold shrink-0">{filteredAthletes.length} / {swimmers.length} Atlet</div>
             </div>
           </div>
           <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
@@ -1666,8 +1764,8 @@ const App = () => {
                     </td>
                     <td className="p-5 text-right">
                       <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                         <button onClick={() => setEditingAthlete(s)} className="text-blue-500 hover:text-blue-700 transition p-2 rounded-lg hover:bg-blue-50"><Edit3 size={18}/></button>
-                         <button onClick={() => deleteSwimmer(s.id)} className="text-red-400 hover:text-red-600 transition p-2 rounded-lg hover:bg-red-50"><Trash2 size={18}/></button>
+                        <button onClick={() => setEditingAthlete(s)} className="text-blue-500 hover:text-blue-700 transition p-2 rounded-lg hover:bg-blue-50"><Edit3 size={18}/></button>
+                        <button onClick={() => deleteSwimmer(s.id)} className="text-red-400 hover:text-red-600 transition p-2 rounded-lg hover:bg-red-50"><Trash2 size={18}/></button>
                       </div>
                     </td>
                   </tr>
@@ -1743,9 +1841,9 @@ const App = () => {
     const eligibleEvents = selectedEntryEntity 
       ? events.filter(ev => {
           if (entryMode === 'individual') {
-             return ev.type === 'Individual' && (ev.gender === selectedEntryEntity.gender || ev.gender === 'Mix') && selectedEntryEntity.category.includes(ev.category);
+            return ev.type === 'Individual' && (ev.gender === selectedEntryEntity.gender || ev.gender === 'Mix') && selectedEntryEntity.category.includes(ev.category);
           } else {
-             return ev.type === 'Estafet'; 
+            return ev.type === 'Estafet'; 
           }
         })
       : [];
@@ -1754,26 +1852,26 @@ const App = () => {
       <div className="h-[85vh] flex gap-6 pb-10">
         <div className="w-[40%] bg-white rounded-3xl shadow-sm border flex flex-col overflow-hidden">
           <div className="p-6 bg-slate-900 text-white shrink-0">
-             <div className="flex items-center justify-between mb-4">
-               <h3 className="font-black uppercase tracking-tighter text-lg flex items-center gap-2"><Edit3 size={20}/> Pendaftaran</h3>
-               <div className="flex gap-3">
-                 <button onClick={() => setShowExportModal(true)} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition flex items-center gap-1 shadow-sm"><Download size={14}/> Psych Sheet</button>
-                 <div className="flex bg-slate-800 p-1 rounded-lg">
-                   <button onClick={() => { setEntryMode('individual'); setSelectedEntryEntity(null); }} className={`px-3 py-1.5 rounded text-[10px] font-black uppercase tracking-widest transition ${entryMode === 'individual' ? 'bg-white text-slate-900' : 'text-slate-400 hover:text-white'}`}>Individu</button>
-                   <button onClick={() => { setEntryMode('relay'); setSelectedEntryEntity(null); }} className={`px-3 py-1.5 rounded text-[10px] font-black uppercase tracking-widest transition ${entryMode === 'relay' ? 'bg-white text-slate-900' : 'text-slate-400 hover:text-white'}`}>Estafet</button>
-                 </div>
-               </div>
-             </div>
-             <div className="relative">
-               <input value={entrySearch} onChange={e => setEntrySearch(e.target.value)} type="text" placeholder={entryMode === 'individual' ? "Cari atlet..." : "Cari tim..."} className="w-full bg-white/10 border border-white/20 rounded-xl p-3 pl-10 text-sm font-bold text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-blue-500" />
-               <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40"/>
-             </div>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-black uppercase tracking-tighter text-lg flex items-center gap-2"><Edit3 size={20}/> Pendaftaran</h3>
+              <div className="flex gap-3">
+                <button onClick={() => setShowExportModal(true)} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition flex items-center gap-1 shadow-sm"><Download size={14}/> Psych Sheet</button>
+                <div className="flex bg-slate-800 p-1 rounded-lg">
+                  <button onClick={() => { setEntryMode('individual'); setSelectedEntryEntity(null); }} className={`px-3 py-1.5 rounded text-[10px] font-black uppercase tracking-widest transition ${entryMode === 'individual' ? 'bg-white text-slate-900' : 'text-slate-400 hover:text-white'}`}>Individu</button>
+                  <button onClick={() => { setEntryMode('relay'); setSelectedEntryEntity(null); }} className={`px-3 py-1.5 rounded text-[10px] font-black uppercase tracking-widest transition ${entryMode === 'relay' ? 'bg-white text-slate-900' : 'text-slate-400 hover:text-white'}`}>Estafet</button>
+                </div>
+              </div>
+            </div>
+            <div className="relative">
+              <input value={entrySearch} onChange={e => setEntrySearch(e.target.value)} type="text" placeholder={entryMode === 'individual' ? "Cari atlet..." : "Cari tim..."} className="w-full bg-white/10 border border-white/20 rounded-xl p-3 pl-10 text-sm font-bold text-white placeholder:text-white/40 focus:outline-none focus:ring-2 focus:ring-blue-500" />
+              <Search size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40"/>
+            </div>
           </div>
           <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
-             {listEntities.map(entity => {
-               const entCount = entries.filter(en => entryMode === 'individual' ? en.swimmerId === entity.id : en.teamId === entity.id).length;
-               return (
-                 <div key={entity.id} onClick={() => setSelectedEntryEntity(entity)} className={`p-4 cursor-pointer transition-all ${selectedEntryEntity?.id === entity.id ? 'bg-blue-50 border-l-4 border-blue-600' : 'hover:bg-slate-50 border-l-4 border-transparent'}`}>
+            {listEntities.map(entity => {
+              const entCount = entries.filter(en => entryMode === 'individual' ? en.swimmerId === entity.id : en.teamId === entity.id).length;
+              return (
+                <div key={entity.id} onClick={() => setSelectedEntryEntity(entity)} className={`p-4 cursor-pointer transition-all ${selectedEntryEntity?.id === entity.id ? 'bg-blue-50 border-l-4 border-blue-600' : 'hover:bg-slate-50 border-l-4 border-transparent'}`}>
                     <div className="flex justify-between items-start">
                       <div>
                         <h4 className={`font-black uppercase text-sm ${selectedEntryEntity?.id === entity.id ? 'text-blue-800' : 'text-slate-800'}`}>{entity.name}</h4>
@@ -1784,50 +1882,50 @@ const App = () => {
                       </div>
                       <div className={`text-[10px] font-black px-2 py-1 rounded ${entCount > 0 ? 'bg-green-100 text-green-700' : 'bg-slate-100 text-slate-400'}`}>{entCount} Acara</div>
                     </div>
-                 </div>
-               )
-             })}
-             {listEntities.length === 0 && <div className="p-10 text-center font-bold text-slate-300 uppercase">Tidak ditemukan</div>}
+                </div>
+              )
+            })}
+            {listEntities.length === 0 && <div className="p-10 text-center font-bold text-slate-300 uppercase">Tidak ditemukan</div>}
           </div>
         </div>
 
         <div className="w-[60%] bg-white rounded-3xl shadow-sm border flex flex-col overflow-hidden">
           {!selectedEntryEntity ? (
-             <div className="flex-1 flex flex-col items-center justify-center text-slate-300">
+            <div className="flex-1 flex flex-col items-center justify-center text-slate-300">
                 <Edit3 size={64} className="mb-4 opacity-50"/>
                 <h3 className="text-xl font-black uppercase text-slate-400">Pilih {entryMode === 'individual' ? 'Atlet' : 'Tim'} di Samping</h3>
                 <p className="font-medium text-sm mt-1 text-center">Klik salah satu nama atlet untuk mulai mendaftarkan<br/>mereka ke dalam acara perlombaan.</p>
-             </div>
+            </div>
           ) : (
             <>
               <div className="p-6 bg-blue-50 border-b border-blue-100 shrink-0">
-                 <div className="flex items-center gap-3 mb-2">
-                   {entryMode === 'individual' ? <UserCheck className="text-blue-600" size={24}/> : <Flag className="text-blue-600" size={24}/>}
-                   <h2 className="text-2xl font-black uppercase text-blue-900 tracking-tight">{selectedEntryEntity.name}</h2>
-                 </div>
-                 <div className="flex gap-3 text-xs font-black uppercase tracking-widest text-blue-700 mt-2">
-                   {entryMode === 'individual' ? (
-                     <>
-                       <span className="bg-white px-2 py-1 rounded border border-blue-100 shadow-sm">{selectedEntryEntity.org}</span>
-                       <span className="bg-white px-2 py-1 rounded border border-blue-100 shadow-sm">{selectedEntryEntity.gender}</span>
-                       <span className="bg-white px-2 py-1 rounded border border-blue-100 shadow-sm">{selectedEntryEntity.age} TH ({selectedEntryEntity.category})</span>
-                     </>
-                   ) : (
-                       <span className="bg-white px-2 py-1 rounded border border-blue-100 shadow-sm">[{selectedEntryEntity.abbr}]</span>
-                   )}
-                 </div>
+                <div className="flex items-center gap-3 mb-2">
+                  {entryMode === 'individual' ? <UserCheck className="text-blue-600" size={24}/> : <Flag className="text-blue-600" size={24}/>}
+                  <h2 className="text-2xl font-black uppercase text-blue-900 tracking-tight">{selectedEntryEntity.name}</h2>
+                </div>
+                <div className="flex gap-3 text-xs font-black uppercase tracking-widest text-blue-700 mt-2">
+                  {entryMode === 'individual' ? (
+                    <>
+                      <span className="bg-white px-2 py-1 rounded border border-blue-100 shadow-sm">{selectedEntryEntity.org}</span>
+                      <span className="bg-white px-2 py-1 rounded border border-blue-100 shadow-sm">{selectedEntryEntity.gender}</span>
+                      <span className="bg-white px-2 py-1 rounded border border-blue-100 shadow-sm">{selectedEntryEntity.age} TH ({selectedEntryEntity.category})</span>
+                    </>
+                  ) : (
+                      <span className="bg-white px-2 py-1 rounded border border-blue-100 shadow-sm">[{selectedEntryEntity.abbr}]</span>
+                  )}
+                </div>
               </div>
               <div className="p-4 bg-slate-50 text-[10px] font-black uppercase text-slate-400 tracking-widest border-b border-slate-200 grid grid-cols-12 shrink-0">
                 <div className="col-span-8 pl-4">Nomor Lomba {entryMode === 'individual' ? 'Individu' : 'Estafet'}</div><div className="col-span-4 text-center">Entry Time (PB)</div>
               </div>
               <div className="flex-1 overflow-y-auto bg-slate-50 p-4 space-y-3">
-                 {eligibleEvents.length === 0 && <div className="text-center p-10 font-bold text-slate-400">Tidak ada acara yang dibuat untuk kategori umur ini.</div>}
-                 {eligibleEvents.map((ev, eIdx) => {
-                   const isEntered = entries.some(en => en.eventId === ev.id && (entryMode === 'individual' ? en.swimmerId === selectedEntryEntity.id : en.teamId === selectedEntryEntity.id));
-                   const currentEntry = entries.find(en => en.eventId === ev.id && (entryMode === 'individual' ? en.swimmerId === selectedEntryEntity.id : en.teamId === selectedEntryEntity.id));
-                   
-                   return (
-                     <div key={ev.id} className={`p-4 rounded-2xl border transition-all flex items-center justify-between shadow-sm ${isEntered ? 'bg-white border-blue-400 shadow-blue-100' : 'bg-white border-slate-200 opacity-70 hover:opacity-100'}`}>
+                {eligibleEvents.length === 0 && <div className="text-center p-10 font-bold text-slate-400">Tidak ada acara yang dibuat untuk kategori umur ini.</div>}
+                {eligibleEvents.map((ev, eIdx) => {
+                  const isEntered = entries.some(en => en.eventId === ev.id && (entryMode === 'individual' ? en.swimmerId === selectedEntryEntity.id : en.teamId === selectedEntryEntity.id));
+                  const currentEntry = entries.find(en => en.eventId === ev.id && (entryMode === 'individual' ? en.swimmerId === selectedEntryEntity.id : en.teamId === selectedEntryEntity.id));
+                  
+                  return (
+                    <div key={ev.id} className={`p-4 rounded-2xl border transition-all flex items-center justify-between shadow-sm ${isEntered ? 'bg-white border-blue-400 shadow-blue-100' : 'bg-white border-slate-200 opacity-70 hover:opacity-100'}`}>
                         <div className="flex items-center gap-4 col-span-8 cursor-pointer" onClick={() => handleToggleEntry(ev.id, '99:99.99')}>
                           <div className={`w-6 h-6 rounded flex items-center justify-center border-2 ${isEntered ? 'bg-blue-600 border-blue-600 text-white' : 'border-slate-300'}`}>{isEntered && <CheckCircle size={16}/>}</div>
                           <div>
@@ -1836,18 +1934,18 @@ const App = () => {
                           </div>
                         </div>
                         <div className="col-span-4 flex justify-end">
-                           <input 
+                          <input 
                               type="text" disabled={!isEntered}
                               className={`w-28 p-3 text-center font-mono font-black text-sm rounded-xl outline-none transition-all ${isEntered ? 'bg-slate-100 border-2 border-slate-200 focus:border-blue-500 focus:bg-white text-blue-700' : 'bg-transparent border-none text-transparent'}`}
                               value={currentEntry ? currentEntry.seedTime : ''}
                               onChange={(e) => handleUpdateEntrySeed(ev.id, e.target.value)}
                               onBlur={(e) => handleUpdateEntrySeed(ev.id, formatTime(e.target.value))}
                               placeholder="99:99.99"
-                           />
+                          />
                         </div>
-                     </div>
-                   );
-                 })}
+                    </div>
+                  );
+                })}
               </div>
             </>
           )}
@@ -2017,105 +2115,105 @@ const App = () => {
     return (
       <div className="flex flex-col h-[85vh] bg-[#d4d0c8] border-[3px] border-slate-400 font-sans text-xs shadow-2xl relative">
         <div className="bg-[#ece9d8] flex gap-4 px-3 py-1.5 text-black border-b border-slate-400 text-[11px] shadow-sm">
-           <span className="cursor-default"><u>E</u>vents</span><span className="cursor-default">A<u>t</u>hletes</span><span className="cursor-default"><u>R</u>elays</span><span className="cursor-default"><u>S</u>eeding</span><span className="cursor-default">R<u>u</u>n</span><span className="cursor-default">Re<u>p</u>orts</span><span className="cursor-default text-indigo-700 font-bold ml-auto hover:underline" onClick={() => setActiveTab('leaderboard')}>[ Switch To Reports ]</span>
+          <span className="cursor-default"><u>E</u>vents</span><span className="cursor-default">A<u>t</u>hletes</span><span className="cursor-default"><u>R</u>elays</span><span className="cursor-default"><u>S</u>eeding</span><span className="cursor-default">R<u>u</u>n</span><span className="cursor-default">Re<u>p</u>orts</span><span className="cursor-default text-indigo-700 font-bold ml-auto hover:underline" onClick={() => setActiveTab('leaderboard')}>[ Switch To Reports ]</span>
         </div>
         
         <div className="bg-blue-900 text-white p-1 px-4 font-bold flex justify-between tracking-wider shadow-inner text-sm">
-           <span>SWIMMEET PRO - RUN SCREEN (ADMIN MODE)</span><span className="opacity-80">Meet Manager Licensed to: Admin - {adminPin}</span>
+          <span>SWIMMEET PRO - RUN SCREEN (ADMIN MODE)</span><span className="opacity-80">Meet Manager Licensed to: Admin - {adminPin}</span>
         </div>
 
         <div className="flex flex-1 overflow-hidden p-1.5 gap-1.5">
           <div className="w-[35%] flex flex-col bg-white border border-slate-500 shadow-inner">
-             <div className="bg-[#cdd5ea] text-blue-900 font-bold p-1.5 border-b border-slate-500 text-center tracking-wider text-[11px]">EVENT LIST - All Events</div>
-             <div className="flex-1 overflow-y-auto">
-               <table className="w-full text-left whitespace-nowrap cursor-default">
-                 <thead className="bg-[#ece9d8] sticky top-0 shadow-sm outline outline-1 outline-slate-400">
-                   <tr><th className="border-r border-b border-slate-400 px-1 text-center w-8">Evt #</th><th className="border-r border-b border-slate-400 px-1 text-center w-8">Rnd</th><th className="border-r border-b border-slate-400 px-1 text-center w-16">Status</th><th className="border-b border-slate-400 px-2">Event Name</th></tr>
-                 </thead>
-                 <tbody>
-                   {events.map((ev, idx) => {
-                     const evEntries = entries.filter(e => e.eventId === ev.id);
-                     const isScored = evEntries.some(e => e.standardPoints > 0 || e.alternativePoints > 0);
-                     const isDone = evEntries.length > 0 && evEntries.every(e => (e.resultTime && e.resultTime.trim() !== '') || e.status);
-                     const isUnseeded = evEntries.length === 0 || evEntries.some(e => e.heat === 0);
-                     
-                     let status = 'Un-Seeded'; let statusColor = '';
-                     if (isScored) { status = 'Scored'; statusColor = 'bg-[#ffccff]'; } else if (isDone) { status = 'Done'; statusColor = 'bg-[#ccffcc]'; } else if (!isUnseeded) { status = 'Seeded'; statusColor = 'bg-[#ffffcc]'; }
+            <div className="bg-[#cdd5ea] text-blue-900 font-bold p-1.5 border-b border-slate-500 text-center tracking-wider text-[11px]">EVENT LIST - All Events</div>
+            <div className="flex-1 overflow-y-auto">
+              <table className="w-full text-left whitespace-nowrap cursor-default">
+                <thead className="bg-[#ece9d8] sticky top-0 shadow-sm outline outline-1 outline-slate-400">
+                  <tr><th className="border-r border-b border-slate-400 px-1 text-center w-8">Evt #</th><th className="border-r border-b border-slate-400 px-1 text-center w-8">Rnd</th><th className="border-r border-b border-slate-400 px-1 text-center w-16">Status</th><th className="border-b border-slate-400 px-2">Event Name</th></tr>
+                </thead>
+                <tbody>
+                  {events.map((ev, idx) => {
+                    const evEntries = entries.filter(e => e.eventId === ev.id);
+                    const isScored = evEntries.some(e => e.standardPoints > 0 || e.alternativePoints > 0);
+                    const isDone = evEntries.length > 0 && evEntries.every(e => (e.resultTime && e.resultTime.trim() !== '') || e.status);
+                    const isUnseeded = evEntries.length === 0 || evEntries.some(e => e.heat === 0);
+                    
+                    let status = 'Un-Seeded'; let statusColor = '';
+                    if (isScored) { status = 'Scored'; statusColor = 'bg-[#ffccff]'; } else if (isDone) { status = 'Done'; statusColor = 'bg-[#ccffcc]'; } else if (!isUnseeded) { status = 'Seeded'; statusColor = 'bg-[#ffffcc]'; }
 
-                     return (
-                       <tr key={ev.id} onClick={() => { setRunEventId(ev.id); setRunHeat(1); }} className={`${runEventId === ev.id ? 'bg-blue-700 text-white' : 'hover:bg-[#f0f0f0] text-black'} border-b border-slate-200`}>
-                         <td className="border-r border-slate-300 px-1 text-center">{idx + 1}</td><td className="border-r border-slate-300 px-1 text-center">F</td><td className={`border-r border-slate-300 px-1 text-center font-bold ${statusColor} ${statusColor ? 'text-black' : ''}`}>{status}</td><td className="px-2 truncate py-1 text-[11px] font-semibold">Event {idx + 1} - {ev.name}</td>
-                       </tr>
-                     )
-                   })}
-                 </tbody>
-               </table>
-             </div>
+                    return (
+                      <tr key={ev.id} onClick={() => { setRunEventId(ev.id); setRunHeat(1); }} className={`${runEventId === ev.id ? 'bg-blue-700 text-white' : 'hover:bg-[#f0f0f0] text-black'} border-b border-slate-200`}>
+                        <td className="border-r border-slate-300 px-1 text-center">{idx + 1}</td><td className="border-r border-slate-300 px-1 text-center">F</td><td className={`border-r border-slate-300 px-1 text-center font-bold ${statusColor} ${statusColor ? 'text-black' : ''}`}>{status}</td><td className="px-2 truncate py-1 text-[11px] font-semibold">Event {idx + 1} - {ev.name}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           <div className="w-[65%] flex flex-col gap-1.5">
-             <div className="bg-[#ece9d8] border border-slate-500 p-1.5 flex justify-between shadow-sm">
+            <div className="bg-[#ece9d8] border border-slate-500 p-1.5 flex justify-between shadow-sm">
                 <div className="flex gap-1.5">
-                   <button className="bg-[#dfdfdf] border border-slate-500 px-4 py-1 text-[11px] font-bold shadow-[inset_1px_1px_0_#fff,inset_-1px_-1px_0_#888] active:shadow-[inset_1px_1px_0_#888,inset_-1px_-1px_0_#fff]" onClick={() => setRunHeat(Math.max(1, runHeat - 1))}>{'< Prev Heat'}</button>
-                   <button className="bg-[#dfdfdf] border border-slate-500 px-4 py-1 text-[11px] font-bold shadow-[inset_1px_1px_0_#fff,inset_-1px_-1px_0_#888] active:shadow-[inset_1px_1px_0_#888,inset_-1px_-1px_0_#fff]" onClick={() => setRunHeat(Math.min(heatsCount, runHeat + 1))}>{'Next Heat >'}</button>
+                  <button className="bg-[#dfdfdf] border border-slate-500 px-4 py-1 text-[11px] font-bold shadow-[inset_1px_1px_0_#fff,inset_-1px_-1px_0_#888] active:shadow-[inset_1px_1px_0_#888,inset_-1px_-1px_0_#fff]" onClick={() => setRunHeat(Math.max(1, runHeat - 1))}>{'< Prev Heat'}</button>
+                  <button className="bg-[#dfdfdf] border border-slate-500 px-4 py-1 text-[11px] font-bold shadow-[inset_1px_1px_0_#fff,inset_-1px_-1px_0_#888] active:shadow-[inset_1px_1px_0_#888,inset_-1px_-1px_0_#fff]" onClick={() => setRunHeat(Math.min(heatsCount, runHeat + 1))}>{'Next Heat >'}</button>
                 </div>
                 <div className="flex gap-1.5">
-                   <button className="bg-[#dfdfdf] border border-slate-500 px-3 py-1 text-[10px] font-bold shadow-[inset_1px_1px_0_#fff,inset_-1px_-1px_0_#888] active:shadow-[inset_1px_1px_0_#888,inset_-1px_-1px_0_#fff]" onClick={() => calculatePoints(runEventId)}>Score : Ctrl-S</button>
-                   <button className="bg-[#dfdfdf] border border-slate-500 px-3 py-1 text-[10px] font-bold shadow-[inset_1px_1px_0_#fff,inset_-1px_-1px_0_#888] active:shadow-[inset_1px_1px_0_#888,inset_-1px_-1px_0_#fff] text-blue-700" onClick={() => promptExportFormat(runEventId, false)}>Gen. Result</button>
-                   <button className="bg-[#dfdfdf] border border-slate-500 px-3 py-1 text-[10px] font-bold shadow-[inset_1px_1px_0_#fff,inset_-1px_-1px_0_#888] active:shadow-[inset_1px_1px_0_#888,inset_-1px_-1px_0_#fff] text-red-700" onClick={() => promptExportFormat(runEventId, true)}>Gen. Score</button>
+                  <button className="bg-[#dfdfdf] border border-slate-500 px-3 py-1 text-[10px] font-bold shadow-[inset_1px_1px_0_#fff,inset_-1px_-1px_0_#888] active:shadow-[inset_1px_1px_0_#888,inset_-1px_-1px_0_#fff]" onClick={() => calculatePoints(runEventId)}>Score : Ctrl-S</button>
+                  <button className="bg-[#dfdfdf] border border-slate-500 px-3 py-1 text-[10px] font-bold shadow-[inset_1px_1px_0_#fff,inset_-1px_-1px_0_#888] active:shadow-[inset_1px_1px_0_#888,inset_-1px_-1px_0_#fff] text-blue-700" onClick={() => promptExportFormat(runEventId, false)}>Gen. Result</button>
+                  <button className="bg-[#dfdfdf] border border-slate-500 px-3 py-1 text-[10px] font-bold shadow-[inset_1px_1px_0_#fff,inset_-1px_-1px_0_#888] active:shadow-[inset_1px_1px_0_#888,inset_-1px_-1px_0_#fff] text-red-700" onClick={() => promptExportFormat(runEventId, true)}>Gen. Score</button>
                 </div>
-             </div>
+            </div>
 
-             <div className="bg-[#ccddff] border border-slate-500 p-1.5 text-center font-bold text-black tracking-wide text-sm shadow-inner">
-               Heat {runHeat} of {heatsCount} == Finals == {activeEvent ? `Event ${events.indexOf(activeEvent) + 1} - ${activeEvent.name}` : 'No Event Selected'}
-             </div>
+            <div className="bg-[#ccddff] border border-slate-500 p-1.5 text-center font-bold text-black tracking-wide text-sm shadow-inner">
+              Heat {runHeat} of {heatsCount} == Finals == {activeEvent ? `Event ${events.indexOf(activeEvent) + 1} - ${activeEvent.name}` : 'No Event Selected'}
+            </div>
 
-             <div className="flex-1 bg-white border border-slate-500 overflow-y-auto shadow-inner relative">
-               <table className="w-full text-left border-collapse whitespace-nowrap text-[11px]">
-                 <thead className="bg-[#ece9d8] sticky top-0 outline outline-1 outline-slate-400 z-10">
-                   <tr>
-                     <th className="border-r border-b border-slate-400 px-2 py-1 text-center font-semibold">Lane</th><th className="border-r border-b border-slate-400 px-2 py-1 font-semibold">Athlete/Team Name</th><th className="border-r border-b border-slate-400 px-2 py-1 text-center font-semibold">Age</th><th className="border-r border-b border-slate-400 px-2 py-1 font-semibold">Team</th><th className="border-r border-b border-slate-400 px-2 py-1 text-center font-semibold">Seed Time</th><th className="border-r border-b border-slate-400 px-2 py-1 text-center font-semibold bg-yellow-100">Finals Time</th><th className="border-r border-b border-slate-400 px-1 py-1 text-center font-semibold text-red-700">Status</th><th className="border-r border-b border-slate-400 px-1 py-1 text-center font-semibold text-blue-700">HPL</th><th className="border-r border-b border-slate-400 px-1 py-1 text-center font-semibold text-blue-700">PL</th><th className="border-b border-slate-400 px-1 py-1 text-center font-semibold text-blue-700">Pts</th>
-                   </tr>
-                 </thead>
-                 <tbody>
-                   {Array.from({length: laneCount}).map((_, i) => {
-                     const laneNum = i + 1; const en = eventEntries.find(e => e.heat === runHeat && e.lane === laneNum);
-                     if (en) {
-                       const name = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.name : teams.find(t => t.id === en.teamId)?.name + ' (ESTAFET)';
-                       const age = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.age : '';
-                       const org = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.org : teams.find(t => t.id === en.teamId)?.abbr;
-                       
-                       return (
-                         <tr key={en.id} className={`${en.status ? 'bg-red-50 text-red-900' : 'hover:bg-[#fff9cc] text-black'} border-b border-slate-200`}>
-                           <td className="border-r border-slate-300 px-2 py-1.5 text-center font-bold bg-[#f4f4f4]">{en.lane}</td>
-                           <td className="border-r border-slate-300 px-2 py-1.5 font-medium">{name}</td>
-                           <td className="border-r border-slate-300 px-2 py-1.5 text-center font-medium">{age}</td>
-                           <td className="border-r border-slate-300 px-2 py-1.5 truncate max-w-[120px] font-medium" title={org}>{org}</td>
-                           <td className="border-r border-slate-300 px-2 py-1.5 text-center bg-slate-50 relative"><span className="font-mono font-bold text-[11px] text-slate-500">{en.seedTime}</span></td>
-                           <td className="border-r border-slate-400 p-0 text-center bg-[#fffcdb] relative">
-                             {en.status ? ( <span className="font-bold text-red-600 tracking-widest">{en.status}</span> ) : (
-                               <input type="text" className="result-time-input absolute inset-0 w-full h-full px-2 text-center font-mono font-bold outline-none bg-transparent focus:bg-white focus:ring-[1.5px] focus:ring-blue-600 focus:z-20 transition-all" placeholder="  :  .  " value={en.resultTime} onChange={(e) => updateResult(en.id, e.target.value, en.status)} onBlur={(e) => updateResult(en.id, formatTime(e.target.value), en.status)} onKeyDown={handleTimeKeyDown}/>
-                             )}
-                           </td>
-                           <td className="border-r border-slate-300 p-0 text-center bg-white relative">
-                             <select className={`absolute inset-0 w-full h-full bg-transparent outline-none text-center font-bold text-[10px] ${en.status === 'DQ' ? 'text-red-600' : en.status ? 'text-orange-600' : 'text-slate-400'}`} value={en.status || ''} onChange={(e) => updateResult(en.id, en.resultTime, e.target.value)}>
-                               <option value="">-</option><option value="DQ" className="text-red-600">DQ</option><option value="DNS" className="text-orange-600">DNS</option><option value="DNF" className="text-orange-600">DNF</option><option value="SCR" className="text-slate-600">SCR</option>
-                             </select>
-                           </td>
-                           <td className="border-r border-slate-300 px-1 py-1.5 text-center font-bold text-slate-600">{en.hpl || ''}</td><td className="border-r border-slate-300 px-1 py-1.5 text-center font-bold text-slate-600">{en.pl || ''}</td><td className="px-1 py-1.5 text-center font-bold text-slate-600">{en.standardPoints > 0 ? en.standardPoints : ''}</td>
-                         </tr>
-                       )
-                     } else {
-                       return (
-                         <tr key={`empty-run-${laneNum}`} className="border-b border-slate-200 bg-[#f9f9f9] opacity-70">
-                           <td className="border-r border-slate-300 px-2 py-1.5 text-center font-bold bg-[#f4f4f4] text-slate-400">{laneNum}</td><td className="border-r border-slate-300 px-2 py-1.5 font-bold tracking-widest text-slate-300 text-center uppercase text-[9px]">- EMPTY -</td><td className="border-r border-slate-300 px-2 py-1.5"></td><td className="border-r border-slate-300 px-2 py-1.5"></td><td className="border-r border-slate-300 px-2 py-1.5"></td><td className="border-r border-slate-400 p-0 text-center bg-[#eaeaea]"></td><td className="border-r border-slate-300 p-0 text-center"></td><td className="border-r border-slate-300 px-1 py-1.5"></td><td className="border-r border-slate-300 px-1 py-1.5"></td><td className="px-1 py-1.5"></td>
-                         </tr>
-                       )
-                     }
-                   })}
-                 </tbody>
-               </table>
-             </div>
+            <div className="flex-1 bg-white border border-slate-500 overflow-y-auto shadow-inner relative">
+              <table className="w-full text-left border-collapse whitespace-nowrap text-[11px]">
+                <thead className="bg-[#ece9d8] sticky top-0 outline outline-1 outline-slate-400 z-10">
+                  <tr>
+                    <th className="border-r border-b border-slate-400 px-2 py-1 text-center font-semibold">Lane</th><th className="border-r border-b border-slate-400 px-2 py-1 font-semibold">Athlete/Team Name</th><th className="border-r border-b border-slate-400 px-2 py-1 text-center font-semibold">Age</th><th className="border-r border-b border-slate-400 px-2 py-1 font-semibold">Team</th><th className="border-r border-b border-slate-400 px-2 py-1 text-center font-semibold">Seed Time</th><th className="border-r border-b border-slate-400 px-2 py-1 text-center font-semibold bg-yellow-100">Finals Time</th><th className="border-r border-b border-slate-400 px-1 py-1 text-center font-semibold text-red-700">Status</th><th className="border-r border-b border-slate-400 px-1 py-1 text-center font-semibold text-blue-700">HPL</th><th className="border-r border-b border-slate-400 px-1 py-1 text-center font-semibold text-blue-700">PL</th><th className="border-b border-slate-400 px-1 py-1 text-center font-semibold text-blue-700">Pts</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Array.from({length: laneCount}).map((_, i) => {
+                    const laneNum = i + 1; const en = eventEntries.find(e => e.heat === runHeat && e.lane === laneNum);
+                    if (en) {
+                      const name = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.name : teams.find(t => t.id === en.teamId)?.name + ' (ESTAFET)';
+                      const age = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.age : '';
+                      const org = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.org : teams.find(t => t.id === en.teamId)?.abbr;
+                      
+                      return (
+                        <tr key={en.id} className={`${en.status ? 'bg-red-50 text-red-900' : 'hover:bg-[#fff9cc] text-black'} border-b border-slate-200`}>
+                          <td className="border-r border-slate-300 px-2 py-1.5 text-center font-bold bg-[#f4f4f4]">{en.lane}</td>
+                          <td className="border-r border-slate-300 px-2 py-1.5 font-medium">{name}</td>
+                          <td className="border-r border-slate-300 px-2 py-1.5 text-center font-medium">{age}</td>
+                          <td className="border-r border-slate-300 px-2 py-1.5 truncate max-w-[120px] font-medium" title={org}>{org}</td>
+                          <td className="border-r border-slate-300 px-2 py-1.5 text-center bg-slate-50 relative"><span className="font-mono font-bold text-[11px] text-slate-500">{en.seedTime}</span></td>
+                          <td className="border-r border-slate-400 p-0 text-center bg-[#fffcdb] relative">
+                            {en.status ? ( <span className="font-bold text-red-600 tracking-widest">{en.status}</span> ) : (
+                              <input type="text" className="result-time-input absolute inset-0 w-full h-full px-2 text-center font-mono font-bold outline-none bg-transparent focus:bg-white focus:ring-[1.5px] focus:ring-blue-600 focus:z-20 transition-all" placeholder="  :  .  " value={en.resultTime} onChange={(e) => updateResult(en.id, e.target.value, en.status)} onBlur={(e) => updateResult(en.id, formatTime(e.target.value), en.status)} onKeyDown={handleTimeKeyDown}/>
+                            )}
+                          </td>
+                          <td className="border-r border-slate-300 p-0 text-center bg-white relative">
+                            <select className={`absolute inset-0 w-full h-full bg-transparent outline-none text-center font-bold text-[10px] ${en.status === 'DQ' ? 'text-red-600' : en.status ? 'text-orange-600' : 'text-slate-400'}`} value={en.status || ''} onChange={(e) => updateResult(en.id, en.resultTime, e.target.value)}>
+                              <option value="">-</option><option value="DQ" className="text-red-600">DQ</option><option value="DNS" className="text-orange-600">DNS</option><option value="DNF" className="text-orange-600">DNF</option><option value="SCR" className="text-slate-600">SCR</option>
+                            </select>
+                          </td>
+                          <td className="border-r border-slate-300 px-1 py-1.5 text-center font-bold text-slate-600">{en.hpl || ''}</td><td className="border-r border-slate-300 px-1 py-1.5 text-center font-bold text-slate-600">{en.pl || ''}</td><td className="px-1 py-1.5 text-center font-bold text-slate-600">{en.standardPoints > 0 ? en.standardPoints : ''}</td>
+                        </tr>
+                      )
+                    } else {
+                      return (
+                        <tr key={`empty-run-${laneNum}`} className="border-b border-slate-200 bg-[#f9f9f9] opacity-70">
+                          <td className="border-r border-slate-300 px-2 py-1.5 text-center font-bold bg-[#f4f4f4] text-slate-400">{laneNum}</td><td className="border-r border-slate-300 px-2 py-1.5 font-bold tracking-widest text-slate-300 text-center uppercase text-[9px]">- EMPTY -</td><td className="border-r border-slate-300 px-2 py-1.5"></td><td className="border-r border-slate-300 px-2 py-1.5"></td><td className="border-r border-slate-300 px-2 py-1.5"></td><td className="border-r border-slate-400 p-0 text-center bg-[#eaeaea]"></td><td className="border-r border-slate-300 p-0 text-center"></td><td className="border-r border-slate-300 px-1 py-1.5"></td><td className="border-r border-slate-300 px-1 py-1.5"></td><td className="px-1 py-1.5"></td>
+                        </tr>
+                      )
+                    }
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>
@@ -2176,7 +2274,7 @@ const App = () => {
               <div className="divide-y divide-slate-50">
                 {clubScores.slice(0, 15).map((c, idx) => (
                   <div key={c.name} className="p-6 flex items-center gap-6 hover:bg-slate-50 transition">
-                     <div className="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center font-black text-indigo-600 text-lg shadow-sm">{idx + 1}</div>
+                    <div className="w-12 h-12 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center font-black text-indigo-600 text-lg shadow-sm">{idx + 1}</div>
                     <div className="flex-1">
                       <h5 className="font-black text-slate-800 uppercase text-sm">{c.name}</h5>
                       <span className="text-[10px] bg-indigo-600 text-white px-3 py-1 mt-1 inline-block rounded-md font-black uppercase tracking-widest shadow-sm">[{c.abbr}]</span>
@@ -2194,15 +2292,15 @@ const App = () => {
 
       {reportTab === 'medals' && (
         <div className="space-y-6 animate-in fade-in">
-           <div className="flex justify-between items-center px-4">
+          <div className="flex justify-between items-center px-4">
               <h3 className="text-2xl font-black uppercase tracking-tighter text-slate-800 flex items-center gap-2"><Medal className="text-yellow-500"/> Klasemen Medali Tim</h3>
               <button onClick={() => {
                 const data = medalTally.map((c, i) => ({ Peringkat: i+1, Tim: c.name, ABBR: c.abbr, Emas: c.gold, Perak: c.silver, Perunggu: c.bronze }));
                 exportToXLSX(data, 'MedalTally', 'Klasemen Medali');
               }} className="text-[10px] bg-slate-900 text-white px-4 py-2 rounded-lg font-black uppercase tracking-widest shadow-lg hover:bg-black active:scale-95 transition flex items-center gap-2">Export Excel</button>
-           </div>
-           <div className="bg-white rounded-[2.5rem] border shadow-xl overflow-hidden">
-             <table className="w-full text-left whitespace-nowrap">
+          </div>
+          <div className="bg-white rounded-[2.5rem] border shadow-xl overflow-hidden">
+            <table className="w-full text-left whitespace-nowrap">
                 <thead className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase border-b">
                   <tr><th className="p-5 text-center w-16">Pos</th><th className="p-5">Klub / Tim</th><th className="p-5 text-center text-yellow-600">Emas</th><th className="p-5 text-center text-slate-500">Perak</th><th className="p-5 text-center text-orange-600">Perunggu</th><th className="p-5 text-center">Total</th></tr>
                 </thead>
@@ -2219,61 +2317,61 @@ const App = () => {
                   ))}
                   {medalTally.length === 0 && <tr><td colSpan="6" className="text-center p-12 font-bold text-slate-400">Belum ada medali yang direbut.</td></tr>}
                 </tbody>
-             </table>
-           </div>
+            </table>
+          </div>
         </div>
       )}
 
       {reportTab === 'best' && (
         <div className="space-y-8 animate-in fade-in">
-           <div className="px-4 flex justify-between items-end">
+          <div className="px-4 flex justify-between items-end">
               <div>
                 <h3 className="text-2xl font-black uppercase tracking-tighter text-slate-800 flex items-center gap-2"><Crown className="text-emerald-500"/> Kandidat Perenang Terbaik</h3>
                 <p className="text-slate-500 text-sm font-medium mt-1">Dihitung otomatis berdasarkan perolehan Emas, Perak, Perunggu, dan Poin.</p>
               </div>
-           </div>
-           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {Object.entries(bestSwimmersData).map(([groupKey, swimmersList]) => {
                 const topSwimmer = swimmersList[0];
                 if (!topSwimmer || topSwimmer.points === 0) return null;
                 return (
                   <div key={groupKey} className="bg-white p-8 rounded-[2rem] border border-slate-200 shadow-xl relative overflow-hidden group">
-                     <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-bl-full -z-10 group-hover:scale-110 transition-transform"></div>
-                     <span className="bg-emerald-100 text-emerald-800 px-4 py-1.5 rounded-xl text-xs font-black uppercase tracking-widest border border-emerald-200">{groupKey}</span>
-                     <h4 className="text-2xl font-black text-slate-800 uppercase mt-4 tracking-tight leading-none">{topSwimmer.name}</h4>
-                     <p className="text-xs font-bold text-slate-500 uppercase mt-2">{topSwimmer.org} [{topSwimmer.abbr}]</p>
-                     
-                     <div className="mt-6 flex gap-4">
-                       <div className="bg-slate-50 px-4 py-3 rounded-2xl border border-slate-100 text-center flex-1">
-                         <div className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Medali</div>
-                         <div className="font-black text-slate-800 flex items-center justify-center gap-2">
-                           <span className="text-yellow-500">{topSwimmer.gold}</span>-
-                           <span className="text-slate-400">{topSwimmer.silver}</span>-
-                           <span className="text-orange-500">{topSwimmer.bronze}</span>
-                         </div>
-                       </div>
-                       <div className="bg-slate-50 px-4 py-3 rounded-2xl border border-slate-100 text-center flex-1">
-                         <div className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Poin</div>
-                         <div className="font-black text-indigo-600 text-xl leading-none">{topSwimmer.points}</div>
-                       </div>
-                     </div>
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-bl-full -z-10 group-hover:scale-110 transition-transform"></div>
+                    <span className="bg-emerald-100 text-emerald-800 px-4 py-1.5 rounded-xl text-xs font-black uppercase tracking-widest border border-emerald-200">{groupKey}</span>
+                    <h4 className="text-2xl font-black text-slate-800 uppercase mt-4 tracking-tight leading-none">{topSwimmer.name}</h4>
+                    <p className="text-xs font-bold text-slate-500 uppercase mt-2">{topSwimmer.org} [{topSwimmer.abbr}]</p>
+                    
+                    <div className="mt-6 flex gap-4">
+                      <div className="bg-slate-50 px-4 py-3 rounded-2xl border border-slate-100 text-center flex-1">
+                        <div className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Medali</div>
+                        <div className="font-black text-slate-800 flex items-center justify-center gap-2">
+                          <span className="text-yellow-500">{topSwimmer.gold}</span>-
+                          <span className="text-slate-400">{topSwimmer.silver}</span>-
+                          <span className="text-orange-500">{topSwimmer.bronze}</span>
+                        </div>
+                      </div>
+                      <div className="bg-slate-50 px-4 py-3 rounded-2xl border border-slate-100 text-center flex-1">
+                        <div className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Poin</div>
+                        <div className="font-black text-indigo-600 text-xl leading-none">{topSwimmer.points}</div>
+                      </div>
+                    </div>
                   </div>
                 )
               })}
-           </div>
+          </div>
         </div>
       )}
 
       {reportTab === 'cert' && (
         <div className="space-y-6 animate-in fade-in">
-           <div className="px-4">
+          <div className="px-4">
               <h3 className="text-2xl font-black uppercase tracking-tighter text-slate-800 flex items-center gap-2"><Award className="text-indigo-500"/> Cetak Sertifikat Otomatis</h3>
               <p className="text-slate-500 text-sm font-medium mt-1">Sistem Mail-Merge canggih PDF. Unggah template gambar kosong Anda, atur posisi teks, dan generate!</p>
-           </div>
-           
-           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          </div>
+          
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
               <div className="lg:col-span-5 space-y-6">
-                 <div className="bg-white p-6 rounded-[2rem] border shadow-sm space-y-4">
+                <div className="bg-white p-6 rounded-[2rem] border shadow-sm space-y-4">
                     <h4 className="font-black text-sm uppercase text-slate-800 tracking-widest border-b pb-3">1. Upload Background (JPG/PNG)</h4>
                     <input type="file" accept="image/*" onChange={handleCertBgUpload} className="hidden" id="cert-upload"/>
                     <label htmlFor="cert-upload" className="w-full h-32 border-2 border-dashed border-indigo-200 rounded-2xl bg-indigo-50 text-indigo-500 flex flex-col items-center justify-center cursor-pointer hover:bg-indigo-100 transition">
@@ -2281,9 +2379,9 @@ const App = () => {
                       <span className="font-bold text-sm">Klik untuk Unggah Gambar</span>
                     </label>
                     {certBg && <div className="text-xs font-bold text-emerald-600 text-center bg-emerald-50 py-2 rounded-lg">✓ Gambar termuat!</div>}
-                 </div>
+                </div>
 
-                 <div className="bg-white p-6 rounded-[2rem] border shadow-sm space-y-4">
+                <div className="bg-white p-6 rounded-[2rem] border shadow-sm space-y-4">
                     <h4 className="font-black text-sm uppercase text-slate-800 tracking-widest border-b pb-3">2. Cetak ke PDF</h4>
                     <form onSubmit={(e) => { e.preventDefault(); const formData = new FormData(e.target); handleGenerateCerts(formData.get('eventId'), parseInt(formData.get('topN'))); }} className="space-y-4">
                       <div>
@@ -2302,14 +2400,14 @@ const App = () => {
                       </div>
                       <button type="submit" className="w-full bg-indigo-600 text-white p-4 rounded-xl font-black uppercase hover:bg-indigo-700 shadow-md transition active:scale-95 flex items-center justify-center gap-2"><Award size={18}/> Generate Sertifikat</button>
                     </form>
-                 </div>
+                </div>
               </div>
 
               <div className="lg:col-span-7 bg-white p-6 rounded-[2rem] border shadow-sm h-fit">
-                 <h4 className="font-black text-sm uppercase text-slate-800 tracking-widest border-b pb-3 mb-6">3. Kalibrasi Koordinat Posisi Teks</h4>
-                 <div className="space-y-4">
-                   {['name', 'team', 'event', 'time', 'rank'].map(key => (
-                     <div key={key} className="flex items-center gap-4 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                <h4 className="font-black text-sm uppercase text-slate-800 tracking-widest border-b pb-3 mb-6">3. Kalibrasi Koordinat Posisi Teks</h4>
+                <div className="space-y-4">
+                  {['name', 'team', 'event', 'time', 'rank'].map(key => (
+                    <div key={key} className="flex items-center gap-4 p-3 bg-slate-50 rounded-xl border border-slate-100">
                         <div className="w-24">
                           <span className="text-[10px] font-black text-slate-400 uppercase block mb-1">Elemen</span>
                           <span className="font-black text-slate-700 uppercase text-xs">{key === 'name' ? 'Nama Atlet' : key === 'team' ? 'Nama Klub' : key === 'event' ? 'Nama Lomba' : key === 'time' ? 'Waktu' : 'Peringkat'}</span>
@@ -2319,20 +2417,20 @@ const App = () => {
                           <span className="text-xs font-bold text-slate-500">Tampilkan</span>
                         </label>
                         <div className="flex-1 flex gap-2">
-                           <div className="flex items-center bg-white border rounded-lg px-2 flex-1"><span className="text-[10px] font-black text-slate-400 mr-2">X:</span><input type="number" value={certCoords[key]?.x} onChange={(e) => updateActiveMeet({ certCoords: { ...certCoords, [key]: { ...certCoords[key], x: parseInt(e.target.value) || 0 } } })} className="w-full py-1 text-center font-bold text-sm outline-none bg-transparent" disabled={!certCoords[key]?.show}/></div>
-                           <div className="flex items-center bg-white border rounded-lg px-2 flex-1"><span className="text-[10px] font-black text-slate-400 mr-2">Y:</span><input type="number" value={certCoords[key]?.y} onChange={(e) => updateActiveMeet({ certCoords: { ...certCoords, [key]: { ...certCoords[key], y: parseInt(e.target.value) || 0 } } })} className="w-full py-1 text-center font-bold text-sm outline-none bg-transparent" disabled={!certCoords[key]?.show}/></div>
+                          <div className="flex items-center bg-white border rounded-lg px-2 flex-1"><span className="text-[10px] font-black text-slate-400 mr-2">X:</span><input type="number" value={certCoords[key]?.x} onChange={(e) => updateActiveMeet({ certCoords: { ...certCoords, [key]: { ...certCoords[key], x: parseInt(e.target.value) || 0 } } })} className="w-full py-1 text-center font-bold text-sm outline-none bg-transparent" disabled={!certCoords[key]?.show}/></div>
+                          <div className="flex items-center bg-white border rounded-lg px-2 flex-1"><span className="text-[10px] font-black text-slate-400 mr-2">Y:</span><input type="number" value={certCoords[key]?.y} onChange={(e) => updateActiveMeet({ certCoords: { ...certCoords, [key]: { ...certCoords[key], y: parseInt(e.target.value) || 0 } } })} className="w-full py-1 text-center font-bold text-sm outline-none bg-transparent" disabled={!certCoords[key]?.show}/></div>
                         </div>
-                     </div>
-                   ))}
-                 </div>
-                 
-                 <button onClick={handlePreviewCert} className="w-full mt-6 bg-emerald-600 text-white p-3 rounded-xl font-black uppercase hover:bg-emerald-700 shadow-md transition active:scale-95 flex items-center justify-center gap-2">
-                   <FileImage size={18}/> Download Preview Test
-                 </button>
+                    </div>
+                  ))}
+                </div>
+                
+                <button onClick={handlePreviewCert} className="w-full mt-6 bg-emerald-600 text-white p-3 rounded-xl font-black uppercase hover:bg-emerald-700 shadow-md transition active:scale-95 flex items-center justify-center gap-2">
+                  <FileImage size={18}/> Download Preview Test
+                </button>
 
-                 <p className="text-[10px] font-bold text-slate-400 mt-4 leading-relaxed bg-slate-100 p-3 rounded-lg">Kertas PDF bersifat Landscape A4 (297mm x 210mm).<br/>Sumbu X (0 - 297) = Jarak teks dari kiri ke kanan. Gunakan X=148 agar teks berada tepat di tengah (Center Align).<br/>Sumbu Y (0 - 210) = Jarak teks dari atas ke bawah.</p>
+                <p className="text-[10px] font-bold text-slate-400 mt-4 leading-relaxed bg-slate-100 p-3 rounded-lg">Kertas PDF bersifat Landscape A4 (297mm x 210mm).<br/>Sumbu X (0 - 297) = Jarak teks dari kiri ke kanan. Gunakan X=148 agar teks berada tepat di tengah (Center Align).<br/>Sumbu Y (0 - 210) = Jarak teks dari atas ke bawah.</p>
               </div>
-           </div>
+          </div>
         </div>
       )}
     </div>
@@ -2448,13 +2546,13 @@ const App = () => {
         <div className="absolute top-0 left-0 w-full h-64 bg-slate-900 -z-10 rounded-b-[4rem]"></div>
         
         {activeMeetId === null ? (
-           <div className="max-w-6xl mx-auto space-y-10 pb-20 animate-in fade-in">
-             <div className="flex justify-between items-end mb-6">
+          <div className="max-w-6xl mx-auto space-y-10 pb-20 animate-in fade-in">
+            <div className="flex justify-between items-end mb-6">
                 <h2 className="text-2xl font-black text-white tracking-tight flex items-center gap-2"><Cloud className="text-blue-500"/> Kejuaraan Online</h2>
                 <button onClick={() => setShowNewMeetModal(true)} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-3 rounded-xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition flex items-center gap-2"><Plus size={16}/> Buat Baru</button>
-             </div>
-             
-             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            </div>
+            
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
                 <div className="grid grid-cols-12 bg-slate-50 p-5 border-b border-slate-200 text-xs font-black uppercase text-slate-400 tracking-widest">
                   <div className="col-span-8">Nama Kejuaraan</div><div className="col-span-4 text-right">Aksi</div>
                 </div>
@@ -2473,19 +2571,19 @@ const App = () => {
                   ))}
                   {meets.length === 0 && <div className="p-20 text-center text-slate-300 font-black uppercase tracking-widest">Belum ada lomba di Cloud</div>}
                 </div>
-             </div>
-           </div>
+            </div>
+          </div>
         ) : (
           <div className="p-6 bg-white rounded-3xl shadow-xl min-h-[400px]">
-             {/* Konten akan menyesuaikan dengan tab yang dipilih */}
-             {activeTab === 'dashboard' && renderDashboard()}
-             {activeTab === 'master-setup' && renderMasterSetup()}
-             {activeTab === 'teams' && renderTeams()}
-             {activeTab === 'athletes' && renderAthletes()}
-             {activeTab === 'entries' && renderEntries()}
-             {activeTab === 'seeding' && renderSeedingModule()}
-             {activeTab === 'admin-panel' && renderAdminPanel()}
-             {activeTab === 'leaderboard' && renderLeaderboard()}
+            {/* Konten akan menyesuaikan dengan tab yang dipilih */}
+            {activeTab === 'dashboard' && renderDashboard()}
+            {activeTab === 'master-setup' && renderMasterSetup()}
+            {activeTab === 'teams' && renderTeams()}
+            {activeTab === 'athletes' && renderAthletes()}
+            {activeTab === 'entries' && renderEntries()}
+            {activeTab === 'seeding' && renderSeedingModule()}
+            {activeTab === 'admin-panel' && renderAdminPanel()}
+            {activeTab === 'leaderboard' && renderLeaderboard()}
           </div>
         )}
       </div>
@@ -2544,15 +2642,15 @@ const App = () => {
             <p className="text-slate-500 text-sm font-medium mb-6">Unduh daftar seluruh atlet beserta entry time mereka yang diurutkan berdasarkan event (Daftar Start / Entry List).</p>
             <div className="space-y-6">
               <div>
-                <label className="text-[10px] font-black text-slate-400 uppercase ml-1 block mb-1">Filter Data</label>
-                <select className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl font-bold focus:ring-2 focus:ring-blue-500 outline-none text-slate-700" value={exportFilterTeam} onChange={e => setExportFilterTeam(e.target.value)}>
-                  <option value="ALL">Semua Tim (Keseluruhan)</option>
-                  {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                <label className="text-[10px] font-black text-slate-400 uppercase ml-1 block mb-1">Tipe Laporan</label>
+                <select className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl font-bold focus:ring-2 focus:ring-blue-500 outline-none text-slate-700" value={exportMode} onChange={e => setExportMode(e.target.value)}>
+                  <option value="overall">Data Keseluruhan (Urut Berdasarkan Event)</option>
+                  <option value="per_team">Data Per Tim (Dikelompokkan Per Kontingen)</option>
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-4">
-                <button onClick={() => handleExportPsychSheet(exportFilterTeam, 'pdf')} className="bg-red-600 text-white p-4 rounded-2xl font-black uppercase shadow-xl shadow-red-200 hover:bg-red-700 transition active:scale-95 flex items-center justify-center gap-2"><FileText size={18}/> Format PDF</button>
-                <button onClick={() => handleExportPsychSheet(exportFilterTeam, 'xlsx')} className="bg-emerald-600 text-white p-4 rounded-2xl font-black uppercase shadow-xl shadow-emerald-200 hover:bg-emerald-700 transition active:scale-95 flex items-center justify-center gap-2"><Layout size={18}/> Format Excel</button>
+                <button onClick={() => handleExportPsychSheet(exportMode, 'pdf')} className="bg-red-600 text-white p-4 rounded-2xl font-black uppercase shadow-xl shadow-red-200 hover:bg-red-700 transition active:scale-95 flex items-center justify-center gap-2"><FileText size={18}/> Format PDF</button>
+                <button onClick={() => handleExportPsychSheet(exportMode, 'xlsx')} className="bg-emerald-600 text-white p-4 rounded-2xl font-black uppercase shadow-xl shadow-emerald-200 hover:bg-emerald-700 transition active:scale-95 flex items-center justify-center gap-2"><Layout size={18}/> Format Excel</button>
               </div>
               <button onClick={() => setShowExportModal(false)} className="w-full p-4 rounded-2xl font-black uppercase text-slate-500 hover:bg-slate-100 transition mt-2">Batal</button>
             </div>
