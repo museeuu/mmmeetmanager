@@ -569,6 +569,74 @@ const App = () => {
     });
   };
 
+  const handleExportEventListPDF = async () => {
+    if (events.length === 0) return showDialog("Kosong", "Belum ada acara lomba yang didaftarkan.", "warning");
+    
+    setImportProgress('Men-generate PDF...'); setIsImporting(true);
+
+    try {
+      const jsPDF = await loadJsPDF();
+      const doc = new jsPDF();
+      let finalY = 15;
+
+      // Header
+      doc.setFontSize(14); doc.setFont("helvetica", "bold");
+      doc.text(`${meetInfo.name.toUpperCase()} - ${meetInfo.date}`, 105, finalY, { align: "center" });
+      finalY += 6;
+      doc.setFontSize(12);
+      doc.text("Event List - By Event Number", 105, finalY, { align: "center" });
+      finalY += 10;
+
+      // Persiapkan data untuk 2 kolom
+      const tableData = [];
+      const halfLength = Math.ceil(events.length / 2);
+      
+      for (let i = 0; i < halfLength; i++) {
+        const leftEvent = events[i];
+        const rightEvent = events[i + halfLength];
+        
+        const row = [
+          i + 1, 
+          leftEvent ? leftEvent.name : '', 
+          rightEvent ? i + halfLength + 1 : '', 
+          rightEvent ? rightEvent.name : ''
+        ];
+        tableData.push(row);
+      }
+
+      doc.autoTable({
+        startY: finalY,
+        head: [['Event #', 'Event Name', 'Event #', 'Event Name']],
+        body: tableData,
+        theme: 'plain',
+        styles: { fontSize: 10, cellPadding: 2 },
+        headStyles: { fontStyle: 'bold', lineWidth: { bottom: 0.5 }, lineColor: [0, 0, 0] },
+        columnStyles: { 
+          0: { cellWidth: 15, halign: 'center' }, 
+          1: { cellWidth: 75 }, 
+          2: { cellWidth: 15, halign: 'center' }, 
+          3: { cellWidth: 75 } 
+        }
+      });
+
+      const pageCount = doc.internal.getNumberOfPages();
+      const printStamp = `MMMeet Manager | Generated at ${new Date().toLocaleString('id-ID')}`;
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i); doc.setFontSize(8); doc.setFont("helvetica", "normal"); doc.setTextColor(100, 100, 100);
+        doc.text(printStamp, 14, 10); doc.text(`Halaman ${i}`, 196, 10, { align: "right" });
+      }
+
+      doc.save(`Event_List_${meetInfo.name.replace(/\s+/g, '_')}.pdf`);
+      showDialog("Sukses", `PDF Event List berhasil dibuat!`, "success");
+    } catch (err) {
+      console.error(err);
+      showDialog("Error", "Gagal men-generate file. Pastikan internet aktif.", "error");
+    } finally {
+      setIsImporting(false);
+      setImportProgress('');
+    }
+  };
+
   const exportToXLSX = async (data, filename, sheetName = "Data", customCols = null) => {
     if (data.length === 0) return showDialog('Kosong', 'Tidak ada data untuk diekspor.', 'warning');
     try {
@@ -863,7 +931,7 @@ const App = () => {
         }
 
         const pageCount = doc.internal.getNumberOfPages();
-        const printStamp = `Generated at ${new Date().toLocaleString('id-ID')}`;
+        const printStamp = `MMMeet Manager - Generated at ${new Date().toLocaleString('id-ID')}`;
         for (let i = 1; i <= pageCount; i++) {
           doc.setPage(i); doc.setFontSize(8); doc.setFont("helvetica", "normal"); doc.setTextColor(100, 100, 100);
           doc.text(printStamp, 14, 10); doc.text(`Halaman ${i}`, 196, 10, { align: "right" });
@@ -1578,6 +1646,7 @@ const App = () => {
           <div className="flex justify-between items-center mb-6">
             <h3 className="text-xl font-black flex items-center gap-2 uppercase text-slate-800"><List className="text-emerald-500" /> Tahap 3: Buat Acara Lomba</h3>
             <div className="flex gap-2">
+              <button onClick={handleExportEventListPDF} className={`bg-white hover:bg-slate-50 text-indigo-600 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition flex items-center gap-2 border-2 border-indigo-100 shadow-sm active:scale-95 ${isImporting ? 'opacity-50 pointer-events-none' : ''}`}><FileText size={14}/> Event List (PDF)</button>
               <button onClick={handleDownloadEventTemplate} className="bg-white hover:bg-slate-50 text-emerald-600 px-4 py-2 rounded-xl text-xs font-black uppercase tracking-widest transition flex items-center gap-2 border-2 border-emerald-100 shadow-sm active:scale-95"><Download size={14}/> Template Setup</button>
               <div>
                 <input type="file" accept=".xlsx, .xls, .csv" ref={fileInputRef} onChange={handleImportEvents} className="hidden" id="import-excel" />
