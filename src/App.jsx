@@ -111,6 +111,8 @@ const App = () => {
   const [isImportingSwimmers, setIsImportingSwimmers] = useState(false);
   const [importProgress, setImportProgress] = useState(''); 
   const [entryMode, setEntryMode] = useState('individual');
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [exportFilterTeam, setExportFilterTeam] = useState('ALL');
 
   const activeMeet = meets.find(m => m.id === activeMeetId) || {};
   
@@ -653,6 +655,132 @@ const App = () => {
       doc.save(`Meet_Program_${meetInfo.name.replace(/\s+/g, '_')}.pdf`);
       showDialog("Sukses", "Meet Program PDF berhasil dibuat dan diunduh!", "success");
     } catch (error) { showDialog("Error", "Gagal men-generate PDF. Pastikan internet aktif.", "error"); } finally { setIsImportingSwimmers(false); setImportProgress(''); }
+  };
+
+  const handleExportPsychSheet = async (teamId, format) => {
+    setIsImportingSwimmers(true);
+    setImportProgress(`Men-generate ${format.toUpperCase()}...`);
+    setShowExportModal(false);
+
+    try {
+      const docTitle = teamId === 'ALL' ? 'Psych Sheet (Keseluruhan)' : `Entry List - ${teams.find(t=>t.id===teamId)?.name}`;
+
+      if (format === 'xlsx') {
+        const XLSX = await loadXlsx();
+        const aoa = [[meetInfo.name.toUpperCase()], [docTitle], []];
+
+        events.forEach((ev, eIdx) => {
+          let evEntries = entries.filter(en => en.eventId === ev.id);
+          if (teamId !== 'ALL') {
+            evEntries = evEntries.filter(en => {
+              if (en.teamId === teamId) return true;
+              if (en.swimmerId) {
+                const sw = swimmers.find(s => s.id === en.swimmerId);
+                return sw && sw.teamId === teamId;
+              }
+              return false;
+            });
+          }
+
+          if (evEntries.length === 0) return;
+
+          evEntries.sort((a, b) => a.seedTime.localeCompare(b.seedTime));
+
+          aoa.push([`Event ${eIdx + 1} - ${ev.name}`]);
+          aoa.push(['Rank', 'Name/Team', 'Age', 'Team', 'Seed Time']);
+
+          evEntries.forEach((en, rank) => {
+            const name = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.name.toUpperCase() : teams.find(t => t.id === en.teamId)?.name.toUpperCase() + ' (A)';
+            const age = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.age?.toString() : '';
+            const org = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.abbr.toUpperCase() : teams.find(t => t.id === en.teamId)?.abbr.toUpperCase();
+            const seed = (en.seedTime === '99:99.99' || !en.seedTime) ? 'NT' : en.seedTime;
+
+            aoa.push([rank + 1, name || '', age || '', org || '', seed]);
+          });
+          aoa.push([]);
+        });
+
+        const ws = XLSX.utils.aoa_to_sheet(aoa);
+        ws['!cols'] = [{wch: 8}, {wch: 40}, {wch: 8}, {wch: 15}, {wch: 15}];
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, ws, "Psych Sheet");
+        XLSX.writeFile(wb, `Psych_Sheet_${meetInfo.name.replace(/\s+/g, '_')}.xlsx`);
+        showDialog("Sukses", `Excel Psych Sheet berhasil dibuat!`, "success");
+
+      } else {
+        const jsPDF = await loadJsPDF();
+        const doc = new jsPDF();
+        let finalY = 20;
+
+        doc.setFontSize(14); doc.setFont("helvetica", "bold");
+        doc.text(meetInfo.name.toUpperCase(), 105, finalY, { align: "center" });
+        finalY += 6;
+        doc.setFontSize(11); doc.setFont("helvetica", "normal");
+        doc.text(docTitle, 105, finalY, { align: "center" });
+        finalY += 15;
+
+        events.forEach((ev, eIdx) => {
+          let evEntries = entries.filter(en => en.eventId === ev.id);
+          if (teamId !== 'ALL') {
+            evEntries = evEntries.filter(en => {
+              if (en.teamId === teamId) return true;
+              if (en.swimmerId) {
+                const sw = swimmers.find(s => s.id === en.swimmerId);
+                return sw && sw.teamId === teamId;
+              }
+              return false;
+            });
+          }
+
+          if (evEntries.length === 0) return;
+
+          evEntries.sort((a, b) => a.seedTime.localeCompare(b.seedTime));
+
+          if (finalY > 260) { doc.addPage(); finalY = 20; }
+
+          doc.setFontSize(11); doc.setFont("helvetica", "bold");
+          doc.text(`Event ${eIdx + 1} - ${ev.name}`, 14, finalY);
+          finalY += 2;
+
+          const tableData = evEntries.map((en, rank) => {
+            const name = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.name.toUpperCase() : teams.find(t => t.id === en.teamId)?.name.toUpperCase() + ' (A)';
+            const age = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.age?.toString() : '';
+            const org = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.abbr.toUpperCase() : teams.find(t => t.id === en.teamId)?.abbr.toUpperCase();
+            const seed = (en.seedTime === '99:99.99' || !en.seedTime) ? 'NT' : en.seedTime;
+
+            return [rank + 1, name || '', age || '', org || '', seed];
+          });
+
+          doc.autoTable({
+            startY: finalY,
+            head: [['Rank', 'Name/Team', 'Age', 'Team', 'Seed Time']],
+            body: tableData,
+            theme: 'plain',
+            styles: { fontSize: 9, cellPadding: 1 },
+            headStyles: { fontStyle: 'bold', lineWidth: { bottom: 0.5 }, lineColor: [0, 0, 0] },
+            columnStyles: { 0: { cellWidth: 15, halign: 'center' }, 1: { cellWidth: 80 }, 2: { cellWidth: 15, halign: 'center' }, 3: { cellWidth: 30 }, 4: { cellWidth: 30, halign: 'center' } },
+            didDrawPage: function (data) { finalY = data.cursor.y; }
+          });
+          finalY = doc.lastAutoTable.finalY + 10;
+        });
+
+        const pageCount = doc.internal.getNumberOfPages();
+        const printStamp = `Generated at ${new Date().toLocaleString('id-ID')}`;
+        for (let i = 1; i <= pageCount; i++) {
+          doc.setPage(i); doc.setFontSize(8); doc.setFont("helvetica", "normal"); doc.setTextColor(100, 100, 100);
+          doc.text(printStamp, 14, 10); doc.text(`Halaman ${i}`, 196, 10, { align: "right" });
+        }
+
+        doc.save(`Psych_Sheet_${meetInfo.name.replace(/\s+/g, '_')}.pdf`);
+        showDialog("Sukses", `PDF Psych Sheet berhasil dibuat!`, "success");
+      }
+    } catch (err) {
+      console.error(err);
+      showDialog("Error", "Gagal men-generate file. Pastikan internet aktif.", "error");
+    } finally {
+      setIsImportingSwimmers(false);
+      setImportProgress('');
+    }
   };
 
   const exportEventResult = async (eventId, includePoints, format = 'pdf') => {
@@ -1628,9 +1756,12 @@ const App = () => {
           <div className="p-6 bg-slate-900 text-white shrink-0">
              <div className="flex items-center justify-between mb-4">
                <h3 className="font-black uppercase tracking-tighter text-lg flex items-center gap-2"><Edit3 size={20}/> Pendaftaran</h3>
-               <div className="flex bg-slate-800 p-1 rounded-lg">
-                 <button onClick={() => { setEntryMode('individual'); setSelectedEntryEntity(null); }} className={`px-3 py-1.5 rounded text-[10px] font-black uppercase tracking-widest transition ${entryMode === 'individual' ? 'bg-white text-slate-900' : 'text-slate-400 hover:text-white'}`}>Individu</button>
-                 <button onClick={() => { setEntryMode('relay'); setSelectedEntryEntity(null); }} className={`px-3 py-1.5 rounded text-[10px] font-black uppercase tracking-widest transition ${entryMode === 'relay' ? 'bg-white text-slate-900' : 'text-slate-400 hover:text-white'}`}>Estafet</button>
+               <div className="flex gap-3">
+                 <button onClick={() => setShowExportModal(true)} className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition flex items-center gap-1 shadow-sm"><Download size={14}/> Psych Sheet</button>
+                 <div className="flex bg-slate-800 p-1 rounded-lg">
+                   <button onClick={() => { setEntryMode('individual'); setSelectedEntryEntity(null); }} className={`px-3 py-1.5 rounded text-[10px] font-black uppercase tracking-widest transition ${entryMode === 'individual' ? 'bg-white text-slate-900' : 'text-slate-400 hover:text-white'}`}>Individu</button>
+                   <button onClick={() => { setEntryMode('relay'); setSelectedEntryEntity(null); }} className={`px-3 py-1.5 rounded text-[10px] font-black uppercase tracking-widest transition ${entryMode === 'relay' ? 'bg-white text-slate-900' : 'text-slate-400 hover:text-white'}`}>Estafet</button>
+                 </div>
                </div>
              </div>
              <div className="relative">
@@ -2400,6 +2531,30 @@ const App = () => {
             <div className="flex gap-4 pt-6 mt-4 border-t border-slate-100 shrink-0">
               <button onClick={() => setEditingPointsType(null)} className="flex-1 p-4 rounded-2xl font-black uppercase text-slate-500 hover:bg-slate-100 transition">Batal</button>
               <button onClick={handleSavePoints} className="flex-1 bg-blue-600 text-white p-4 rounded-2xl font-black uppercase hover:bg-blue-700 shadow-xl shadow-blue-200 transition active:scale-95">Simpan Poin</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Export Psych Sheet */}
+      {showExportModal && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[9990] flex items-center justify-center p-6">
+          <div className="bg-white w-full max-w-lg rounded-[2.5rem] p-10 shadow-2xl animate-in zoom-in border border-slate-100">
+            <h3 className="text-2xl font-black mb-6 uppercase tracking-tighter text-slate-800">Export Psych Sheet</h3>
+            <p className="text-slate-500 text-sm font-medium mb-6">Unduh daftar seluruh atlet beserta entry time mereka yang diurutkan berdasarkan event (Daftar Start / Entry List).</p>
+            <div className="space-y-6">
+              <div>
+                <label className="text-[10px] font-black text-slate-400 uppercase ml-1 block mb-1">Filter Data</label>
+                <select className="w-full p-4 bg-slate-50 border border-slate-200 rounded-2xl font-bold focus:ring-2 focus:ring-blue-500 outline-none text-slate-700" value={exportFilterTeam} onChange={e => setExportFilterTeam(e.target.value)}>
+                  <option value="ALL">Semua Tim (Keseluruhan)</option>
+                  {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <button onClick={() => handleExportPsychSheet(exportFilterTeam, 'pdf')} className="bg-red-600 text-white p-4 rounded-2xl font-black uppercase shadow-xl shadow-red-200 hover:bg-red-700 transition active:scale-95 flex items-center justify-center gap-2"><FileText size={18}/> Format PDF</button>
+                <button onClick={() => handleExportPsychSheet(exportFilterTeam, 'xlsx')} className="bg-emerald-600 text-white p-4 rounded-2xl font-black uppercase shadow-xl shadow-emerald-200 hover:bg-emerald-700 transition active:scale-95 flex items-center justify-center gap-2"><Layout size={18}/> Format Excel</button>
+              </div>
+              <button onClick={() => setShowExportModal(false)} className="w-full p-4 rounded-2xl font-black uppercase text-slate-500 hover:bg-slate-100 transition mt-2">Batal</button>
             </div>
           </div>
         </div>
