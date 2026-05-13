@@ -14,8 +14,6 @@ import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged }
 import { getFirestore, collection, doc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 
 // --- Firebase Initialization ---
-// PERHATIAN: Masukkan konfigurasi Firebase Anda di sini.
-// Anda tidak perlu lagi repot mengatur file .env Vite.
 const localFirebaseConfig = {
   apiKey: "AIzaSyAcpSBOSCORdEORCAFlUvzCCrgZjTPNwc4",
   authDomain: "mmmeetmanager.firebaseapp.com",
@@ -25,7 +23,6 @@ const localFirebaseConfig = {
   appId: "1:172347741761:web:293174a830c2e3c8dd58c0"
 };
 
-// Mode Cerdas: Jika berjalan di Canvas AI, gunakan config Canvas. Jika di komputer Anda, gunakan localFirebaseConfig.
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : localFirebaseConfig;
 
 const app = initializeApp(firebaseConfig);
@@ -112,7 +109,7 @@ const App = () => {
   const [importProgress, setImportProgress] = useState(''); 
   const [entryMode, setEntryMode] = useState('individual');
   const [showExportModal, setShowExportModal] = useState(false);
-  const [exportMode, setExportMode] = useState('overall'); // 'overall' | 'per_team'
+  const [exportMode, setExportMode] = useState('overall');
 
   const activeMeet = meets.find(m => m.id === activeMeetId) || {};
   
@@ -376,9 +373,17 @@ const App = () => {
         swimmerId: isRelayMode ? null : selectedEntryEntity.id, 
         teamId: isRelayMode ? selectedEntryEntity.id : null,
         seedTime: seedTime || '99:99.99', 
-        resultTime: '', status: '', standardPoints: 0, alternativePoints: 0, pl: '', hpl: '', heat: 0, lane: 0
+        resultTime: '', status: '', standardPoints: 0, alternativePoints: 0, pl: '', hpl: '', heat: 0, lane: 0,
+        isSparring: false // Menambahkan flag sparring
       };
       updateActiveMeet({ entries: [...entries, newEntry] });
+    }
+  };
+
+  const handleToggleSparring = (entryId) => {
+    const existingEntry = entries.find(en => en.id === entryId);
+    if (existingEntry) {
+      updateActiveMeet({ entries: entries.map(en => en.id === entryId ? { ...en, isSparring: !en.isSparring } : en) });
     }
   };
 
@@ -404,7 +409,6 @@ const App = () => {
       const seededEntries = eventEntries.filter(en => en.seedTime && en.seedTime !== '99:99.99' && en.seedTime.toLowerCase() !== 'nt');
 
       // Acak urutan (shuffle) perenang yang tidak memiliki seed time
-      // Ini mencegah perenang dari sekolah yang sama menumpuk di heat pertama
       for (let i = noTimeEntries.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * (i + 1));
           [noTimeEntries[i], noTimeEntries[j]] = [noTimeEntries[j], noTimeEntries[i]];
@@ -413,7 +417,7 @@ const App = () => {
       // Urutkan perenang yang memiliki seed time dari tercepat (waktu terkecil) ke terlambat
       seededEntries.sort((a, b) => a.seedTime.localeCompare(b.seedTime));
 
-      // Gabungkan kembali: Yang tercepat di awal array, yang tanpa seed time (diacak) di akhir array
+      // Gabungkan kembali
       eventEntries = [...seededEntries, ...noTimeEntries];
 
       const totalSwimmers = eventEntries.length;
@@ -423,7 +427,6 @@ const App = () => {
 
       // Algoritma Seeding (Mengisi dari heat terakhir/tercepat mundur ke heat pertama)
       eventEntries.forEach((entry, index) => {
-        // Index 0, 1, 2 (tercepat) akan mengisi heat terakhir
         const heatIndexFromEnd = Math.floor(index / laneCount);
         const heatNum = numHeats - heatIndexFromEnd;
         
@@ -437,7 +440,6 @@ const App = () => {
             if(center - l >= 1) lanes.push(center - l);
         }
         
-        // Update data entry di array referensi asli
         const targetEntry = updatedEntries.find(e => e.id === entry.id);
         if (targetEntry) {
             targetEntry.heat = heatNum;
@@ -463,12 +465,22 @@ const App = () => {
   };
 
   const updateResult = (entryId, time, status) => {
-    updateActiveMeet({ entries: entries.map(en => en.id === entryId ? { ...en, resultTime: time, status: status } : en) });
+    // Fitur Quick Status Input (nt -> NT, ns/dns -> DNS, dq -> DQ, dnf -> DNF)
+    let newTime = time;
+    let newStatus = status;
+    const lowerTime = (time || '').toLowerCase().trim();
+
+    if (lowerTime === 'nt') { newTime = ''; newStatus = 'NT'; }
+    else if (lowerTime === 'ns' || lowerTime === 'dns') { newTime = ''; newStatus = 'DNS'; }
+    else if (lowerTime === 'dq') { newTime = ''; newStatus = 'DQ'; }
+    else if (lowerTime === 'dnf') { newTime = ''; newStatus = 'DNF'; }
+    else if (lowerTime === 'scr') { newTime = ''; newStatus = 'SCR'; }
+
+    updateActiveMeet({ entries: entries.map(en => en.id === entryId ? { ...en, resultTime: newTime, status: newStatus } : en) });
   };
 
   const calculatePoints = (eventId, force = false) => {
     const eventEntriesAll = entries.filter(en => en.eventId === eventId);
-    // Yang belum selesai adalah yang tidak punya waktu DAN statusnya kosong (bukan DQ/DNS/DNF/SCR)
     const missingTimes = eventEntriesAll.filter(en => !en.resultTime && !en.status);
 
     if (missingTimes.length > 0 && !force) {
@@ -476,24 +488,34 @@ const App = () => {
       return;
     }
 
-    // Hanya anak yang punya waktu dan statusnya OK yang dapat poin
-    const validEntries = eventEntriesAll.filter(en => en.resultTime && !en.status);
-    validEntries.sort((a, b) => a.resultTime.localeCompare(b.resultTime));
+    // Pisahkan Perenang Reguler dan Sparring/Exhibition
+    const validRegular = eventEntriesAll.filter(en => en.resultTime && !en.status && !en.isSparring);
+    const validSparring = eventEntriesAll.filter(en => en.resultTime && !en.status && en.isSparring);
+
+    validRegular.sort((a, b) => a.resultTime.localeCompare(b.resultTime));
+    validSparring.sort((a, b) => a.resultTime.localeCompare(b.resultTime));
 
     const updatedEntries = entries.map(en => {
       if (en.eventId === eventId) {
         if (en.status || !en.resultTime) {
           return { ...en, standardPoints: 0, alternativePoints: 0, pl: '-', hpl: '-' };
         }
-        const rank = validEntries.findIndex(sorted => sorted.id === en.id);
-        const stdPts = rank < 20 ? scoringTable.standard[rank] : 0;
-        const altPts = rank < 20 ? scoringTable.alternative[rank] : 0;
         
-        const heatEntries = validEntries.filter(heatEn => heatEn.heat === en.heat);
+        // HPL (Heat Placement) tetap dihitung gabungan dalam 1 heat
+        const heatEntries = eventEntriesAll.filter(heatEn => heatEn.heat === en.heat && heatEn.resultTime && !heatEn.status);
         heatEntries.sort((a,b) => a.resultTime.localeCompare(b.resultTime));
         const heatRank = heatEntries.findIndex(sorted => sorted.id === en.id) + 1;
 
-        return { ...en, standardPoints: stdPts, alternativePoints: altPts, pl: rank + 1, hpl: heatRank };
+        if (en.isSparring) {
+          // Sparring: Poin 0, PL jadi 'X'
+          return { ...en, standardPoints: 0, alternativePoints: 0, pl: 'X', hpl: heatRank };
+        } else {
+          // Reguler: Hitung Poin Normal
+          const rank = validRegular.findIndex(sorted => sorted.id === en.id);
+          const stdPts = rank < 20 ? scoringTable.standard[rank] : 0;
+          const altPts = rank < 20 ? scoringTable.alternative[rank] : 0;
+          return { ...en, standardPoints: stdPts, alternativePoints: altPts, pl: rank + 1, hpl: heatRank };
+        }
       }
       return en;
     });
@@ -981,10 +1003,19 @@ const App = () => {
     const modeSuffix = includePoints ? 'Scores' : 'Results';
     const eventNameFull = `Event ${eIdx + 1} - ${activeEvent.distance}m Gaya ${activeEvent.stroke} ${activeEvent.gender} ${activeEvent.category} ${activeEvent.type === 'Estafet' ? '(ESTAFET)' : ''}`;
 
+    // Sorting Khusus: Reguler (1,2,3) -> Sparring ('X') -> Status (DQ, NT)
     const sortedEntries = [...eventEntries].sort((a, b) => {
+      // 1. Status selalu di paling bawah
       if (a.status && !b.status) return 1;
       if (!a.status && b.status) return -1;
-      if (a.pl && b.pl) return a.pl - b.pl;
+      
+      // 2. Sparring ('X') berada di bawah Reguler tapi di atas Status
+      const aIsSparring = a.isSparring || a.pl === 'X';
+      const bIsSparring = b.isSparring || b.pl === 'X';
+      if (!aIsSparring && bIsSparring) return -1;
+      if (aIsSparring && !bIsSparring) return 1;
+
+      // 3. Jika sama-sama reguler / sama-sama sparring, urutkan berdasarkan waktu
       if (a.resultTime && b.resultTime) return a.resultTime.localeCompare(b.resultTime);
       return 0;
     });
@@ -998,7 +1029,11 @@ const App = () => {
           const name = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.name.toUpperCase() : teams.find(t => t.id === en.teamId)?.name.toUpperCase() + ' (A)';
           const age = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.age.toString() : '';
           const org = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.org.toUpperCase() : teams.find(t => t.id === en.teamId)?.abbr.toUpperCase();
-          const row = [ en.status ? en.status : (en.pl || '-'), name || '', age || '', org || '', en.seedTime || 'NT', en.status ? en.status : en.resultTime ];
+          
+          let displayTime = en.status ? en.status : en.resultTime;
+          if (en.isSparring && en.resultTime && !en.status) displayTime = `X ${en.resultTime}`;
+
+          const row = [ en.status ? en.status : (en.pl || '-'), name || '', age || '', org || '', en.seedTime || 'NT', displayTime ];
           if (includePoints) {
             const pts = leaderboardMode === 'standard' ? en.standardPoints : en.alternativePoints;
             row.push(pts > 0 ? pts : '-');
@@ -1027,7 +1062,11 @@ const App = () => {
         const name = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.name.toUpperCase() : teams.find(t => t.id === en.teamId)?.name.toUpperCase() + ' (A)';
         const age = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.age.toString() : '';
         const org = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.org.toUpperCase() : teams.find(t => t.id === en.teamId)?.abbr.toUpperCase();
-        const row = [ en.status ? en.status : (en.pl || '-'), name || '', age || '', org || '', en.seedTime || 'NT', en.status ? en.status : en.resultTime ];
+        
+        let displayTime = en.status ? en.status : en.resultTime;
+        if (en.isSparring && en.resultTime && !en.status) displayTime = `X ${en.resultTime}`;
+
+        const row = [ en.status ? en.status : (en.pl || '-'), name || '', age || '', org || '', en.seedTime || 'NT', displayTime ];
         if (includePoints) {
           const pts = leaderboardMode === 'standard' ? en.standardPoints : en.alternativePoints; row.push(pts > 0 ? pts.toString() : '-');
         }
@@ -1285,7 +1324,6 @@ const App = () => {
 
         const nameStr = row[hMap.name]; const orgStr = hMap.org !== -1 ? (row[hMap.org] || 'Independen') : 'Independen';
         
-        // --- AUTO ABBR LOGIC UNTUK IMPORT EXCEL ---
         let rawAbbr = hMap.abbr !== -1 ? String(row[hMap.abbr] || '').trim() : '';
         let abbrStr = 'IND';
         if (rawAbbr) {
@@ -2014,14 +2052,23 @@ const App = () => {
                   
                   return (
                     <div key={ev.id} className={`p-4 rounded-2xl border transition-all flex items-center justify-between shadow-sm ${isEntered ? 'bg-white border-blue-400 shadow-blue-100' : 'bg-white border-slate-200 opacity-70 hover:opacity-100'}`}>
-                        <div className="flex items-center gap-4 col-span-8 cursor-pointer" onClick={() => handleToggleEntry(ev.id, '99:99.99')}>
-                          <div className={`w-6 h-6 rounded flex items-center justify-center border-2 ${isEntered ? 'bg-blue-600 border-blue-600 text-white' : 'border-slate-300'}`}>{isEntered && <CheckCircle size={16}/>}</div>
+                        <div className="flex items-center gap-4 col-span-7 cursor-pointer" onClick={() => handleToggleEntry(ev.id, '99:99.99')}>
+                          <div className={`w-6 h-6 rounded flex items-center justify-center border-2 shrink-0 ${isEntered ? 'bg-blue-600 border-blue-600 text-white' : 'border-slate-300'}`}>{isEntered && <CheckCircle size={16}/>}</div>
                           <div>
                             <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Event {events.findIndex(e=>e.id===ev.id) + 1}</div>
                             <div className={`font-black uppercase text-sm ${isEntered ? 'text-slate-800' : 'text-slate-500'}`}>{ev.distance}m Gaya {ev.stroke} {ev.gender} {ev.category}</div>
                           </div>
                         </div>
-                        <div className="col-span-4 flex justify-end">
+                        <div className="col-span-5 flex justify-end items-center gap-2">
+                          {isEntered && (
+                            <button 
+                              onClick={() => handleToggleSparring(currentEntry.id)}
+                              className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${currentEntry?.isSparring ? 'bg-orange-500 text-white shadow-md' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}
+                              title="Tandai sebagai Sparring/Exhibition (Tidak dihitung poin)"
+                            >
+                              EXH
+                            </button>
+                          )}
                           <input 
                               type="text" disabled={!isEntered}
                               className={`w-28 p-3 text-center font-mono font-black text-sm rounded-xl outline-none transition-all ${isEntered ? 'bg-slate-100 border-2 border-slate-200 focus:border-blue-500 focus:bg-white text-blue-700' : 'bg-transparent border-none text-transparent'}`}
@@ -2274,7 +2321,10 @@ const App = () => {
                       return (
                         <tr key={en.id} className={`${en.status ? 'bg-red-50 text-red-900' : 'hover:bg-[#fff9cc] text-black'} border-b border-slate-200`}>
                           <td className="border-r border-slate-300 px-2 py-1.5 text-center font-bold bg-[#f4f4f4]">{en.lane}</td>
-                          <td className="border-r border-slate-300 px-2 py-1.5 font-medium">{name}</td>
+                          <td className="border-r border-slate-300 px-2 py-1.5 font-medium">
+                            {name}
+                            {en.isSparring && <span className="ml-2 text-[9px] font-bold bg-orange-100 text-orange-700 border border-orange-200 px-1 py-0.5 rounded">EXH</span>}
+                          </td>
                           <td className="border-r border-slate-300 px-2 py-1.5 text-center font-medium">{age}</td>
                           <td className="border-r border-slate-300 px-2 py-1.5 truncate max-w-[120px] font-medium" title={org}>{org}</td>
                           <td className="border-r border-slate-300 px-2 py-1.5 text-center bg-slate-50 relative"><span className="font-mono font-bold text-[11px] text-slate-500">{en.seedTime}</span></td>
@@ -2285,7 +2335,12 @@ const App = () => {
                           </td>
                           <td className="border-r border-slate-300 p-0 text-center bg-white relative">
                             <select className={`absolute inset-0 w-full h-full bg-transparent outline-none text-center font-bold text-[10px] ${en.status === 'DQ' ? 'text-red-600' : en.status ? 'text-orange-600' : 'text-slate-400'}`} value={en.status || ''} onChange={(e) => updateResult(en.id, en.resultTime, e.target.value)}>
-                              <option value="">-</option><option value="DQ" className="text-red-600">DQ</option><option value="DNS" className="text-orange-600">DNS</option><option value="DNF" className="text-orange-600">DNF</option><option value="SCR" className="text-slate-600">SCR</option>
+                              <option value="">-</option>
+                              <option value="NT" className="text-orange-600">NT</option>
+                              <option value="DQ" className="text-red-600">DQ</option>
+                              <option value="DNS" className="text-orange-600">DNS</option>
+                              <option value="DNF" className="text-orange-600">DNF</option>
+                              <option value="SCR" className="text-slate-600">SCR</option>
                             </select>
                           </td>
                           <td className="border-r border-slate-300 px-1 py-1.5 text-center font-bold text-slate-600">{en.hpl || ''}</td><td className="border-r border-slate-300 px-1 py-1.5 text-center font-bold text-slate-600">{en.pl || ''}</td><td className="px-1 py-1.5 text-center font-bold text-slate-600">{en.standardPoints > 0 ? en.standardPoints : ''}</td>
