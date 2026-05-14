@@ -464,19 +464,31 @@ const App = () => {
     setEditingEntry(null);
   };
 
-  const updateResult = (entryId, time, status) => {
-    // Fitur Quick Status Input (nt -> NT, ns/dns -> DNS, dq -> DQ, dnf -> DNF)
-    let newTime = time;
-    let newStatus = status;
-    const lowerTime = (time || '').toLowerCase().trim();
+  const handleTimeInputChange = (entryId, val) => {
+    let newTime = val;
+    let newStatus = '';
+    const lowerVal = (val || '').toLowerCase().trim();
 
-    if (lowerTime === 'nt') { newTime = ''; newStatus = 'NT'; }
-    else if (lowerTime === 'ns' || lowerTime === 'dns') { newTime = ''; newStatus = 'DNS'; }
-    else if (lowerTime === 'dq') { newTime = ''; newStatus = 'DQ'; }
-    else if (lowerTime === 'dnf') { newTime = ''; newStatus = 'DNF'; }
-    else if (lowerTime === 'scr') { newTime = ''; newStatus = 'SCR'; }
+    if (lowerVal === 'nt') { newTime = ''; newStatus = 'NT'; }
+    else if (lowerVal === 'ns' || lowerVal === 'dns') { newTime = ''; newStatus = 'DNS'; }
+    else if (lowerVal === 'dq') { newTime = ''; newStatus = 'DQ'; }
+    else if (lowerVal === 'dnf') { newTime = ''; newStatus = 'DNF'; }
+    else if (lowerVal === 'scr') { newTime = ''; newStatus = 'SCR'; }
 
     updateActiveMeet({ entries: entries.map(en => en.id === entryId ? { ...en, resultTime: newTime, status: newStatus } : en) });
+  };
+
+  const handleTimeInputBlur = (entryId, val) => {
+    const lowerVal = (val || '').toLowerCase().trim();
+    if (['nt', 'ns', 'dns', 'dq', 'dnf', 'scr'].includes(lowerVal)) return;
+    updateActiveMeet({ entries: entries.map(en => en.id === entryId ? { ...en, resultTime: formatTime(val) } : en) });
+  };
+
+  const handleStatusChange = (entryId, newStatus) => {
+    updateActiveMeet({ entries: entries.map(en => {
+      if (en.id === entryId) return { ...en, status: newStatus, resultTime: newStatus ? '' : en.resultTime };
+      return en;
+    }) });
   };
 
   const calculatePoints = (eventId, force = false) => {
@@ -2329,12 +2341,18 @@ const App = () => {
                           <td className="border-r border-slate-300 px-2 py-1.5 truncate max-w-[120px] font-medium" title={org}>{org}</td>
                           <td className="border-r border-slate-300 px-2 py-1.5 text-center bg-slate-50 relative"><span className="font-mono font-bold text-[11px] text-slate-500">{en.seedTime}</span></td>
                           <td className="border-r border-slate-400 p-0 text-center bg-[#fffcdb] relative">
-                            {en.status ? ( <span className="font-bold text-red-600 tracking-widest">{en.status}</span> ) : (
-                              <input type="text" className="result-time-input absolute inset-0 w-full h-full px-2 text-center font-mono font-bold outline-none bg-transparent focus:bg-white focus:ring-[1.5px] focus:ring-blue-600 focus:z-20 transition-all" placeholder="  :  .  " value={en.resultTime} onChange={(e) => updateResult(en.id, e.target.value, en.status)} onBlur={(e) => updateResult(en.id, formatTime(e.target.value), en.status)} onKeyDown={handleTimeKeyDown}/>
-                            )}
+                            <input 
+                              type="text" 
+                              className={`result-time-input absolute inset-0 w-full h-full px-2 text-center font-mono font-bold outline-none bg-transparent focus:bg-white focus:ring-[1.5px] focus:ring-blue-600 focus:z-20 transition-all ${en.status ? 'text-red-600 tracking-widest' : 'text-slate-800'}`} 
+                              placeholder="  :  .  " 
+                              value={en.status || en.resultTime} 
+                              onChange={(e) => handleTimeInputChange(en.id, e.target.value)} 
+                              onBlur={(e) => handleTimeInputBlur(en.id, e.target.value)} 
+                              onKeyDown={handleTimeKeyDown}
+                            />
                           </td>
                           <td className="border-r border-slate-300 p-0 text-center bg-white relative">
-                            <select className={`absolute inset-0 w-full h-full bg-transparent outline-none text-center font-bold text-[10px] ${en.status === 'DQ' ? 'text-red-600' : en.status ? 'text-orange-600' : 'text-slate-400'}`} value={en.status || ''} onChange={(e) => updateResult(en.id, en.resultTime, e.target.value)}>
+                            <select className={`absolute inset-0 w-full h-full bg-transparent outline-none text-center font-bold text-[10px] ${en.status === 'DQ' ? 'text-red-600' : en.status ? 'text-orange-600' : 'text-slate-400'}`} value={en.status || ''} onChange={(e) => handleStatusChange(en.id, e.target.value)}>
                               <option value="">-</option>
                               <option value="NT" className="text-orange-600">NT</option>
                               <option value="DQ" className="text-red-600">DQ</option>
@@ -2567,8 +2585,44 @@ const App = () => {
                   ))}
                 </div>
                 
-                <button onClick={handlePreviewCert} className="w-full mt-6 bg-emerald-600 text-white p-3 rounded-xl font-black uppercase hover:bg-emerald-700 shadow-md transition active:scale-95 flex items-center justify-center gap-2">
-                  <FileImage size={18}/> Download Preview Test
+                {/* Live Preview Canvas */}
+                {certBg && (
+                  <div className="mt-8 mb-6 border-2 border-slate-200 rounded-xl overflow-hidden bg-slate-100 relative w-full shadow-inner group" style={{ aspectRatio: '297/210' }}>
+                    <div className="absolute top-2 left-2 bg-black/60 text-white text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-lg backdrop-blur-sm z-10 flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span> Live Preview
+                    </div>
+                    <img src={certBg} alt="Certificate Background" className="absolute inset-0 w-full h-full object-cover" />
+                    
+                    {certCoords.name?.show && (
+                      <div className="absolute font-bold text-slate-800 text-xl md:text-2xl whitespace-nowrap" style={{ left: `${(certCoords.name.x / 297) * 100}%`, top: `${(certCoords.name.y / 210) * 100}%`, transform: 'translate(-50%, -100%)' }}>
+                        NAMA ATLET CONTOH
+                      </div>
+                    )}
+                    {certCoords.team?.show && (
+                      <div className="absolute font-bold text-slate-800 text-sm md:text-base whitespace-nowrap" style={{ left: `${(certCoords.team.x / 297) * 100}%`, top: `${(certCoords.team.y / 210) * 100}%`, transform: 'translate(-50%, -100%)' }}>
+                        KLUB AQUATIC CONTOH
+                      </div>
+                    )}
+                    {certCoords.event?.show && (
+                      <div className="absolute font-bold text-slate-800 text-xs md:text-sm whitespace-nowrap" style={{ left: `${(certCoords.event.x / 297) * 100}%`, top: `${(certCoords.event.y / 210) * 100}%`, transform: 'translate(-50%, -100%)' }}>
+                        50M GAYA BEBAS PUTRA
+                      </div>
+                    )}
+                    {certCoords.time?.show && (
+                      <div className="absolute font-bold text-slate-800 text-sm md:text-base whitespace-nowrap" style={{ left: `${(certCoords.time.x / 297) * 100}%`, top: `${(certCoords.time.y / 210) * 100}%`, transform: 'translate(-50%, -100%)' }}>
+                        00:25.50
+                      </div>
+                    )}
+                    {certCoords.rank?.show && (
+                      <div className="absolute font-bold text-slate-800 text-lg md:text-xl whitespace-nowrap" style={{ left: `${(certCoords.rank.x / 297) * 100}%`, top: `${(certCoords.rank.y / 210) * 100}%`, transform: 'translate(-50%, -100%)' }}>
+                        JUARA 1
+                      </div>
+                    )}
+                  </div>
+                )}
+                
+                <button onClick={handlePreviewCert} className="w-full mt-2 bg-emerald-600 text-white p-3 rounded-xl font-black uppercase hover:bg-emerald-700 shadow-md transition active:scale-95 flex items-center justify-center gap-2">
+                  <FileImage size={18}/> Download Preview PDF (Opsional)
                 </button>
 
                 <p className="text-[10px] font-bold text-slate-400 mt-4 leading-relaxed bg-slate-100 p-3 rounded-lg">Kertas PDF bersifat Landscape A4 (297mm x 210mm).<br/>Sumbu X (0 - 297) = Jarak teks dari kiri ke kanan. Gunakan X=148 agar teks berada tepat di tengah (Center Align).<br/>Sumbu Y (0 - 210) = Jarak teks dari atas ke bawah.</p>
