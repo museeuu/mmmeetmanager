@@ -5,7 +5,7 @@ import {
   XCircle, ChevronRight, UserCheck, Database,
   Search, List, Layout, Clock, AlertCircle, FileText, BarChart3, Move, UserCog,
   Share2, PlayCircle, LogOut, ArrowLeft, UploadCloud, Medal, Star, Crown, Flag,
-  Award, FileImage, Cloud, Loader2
+  Award, FileImage, Cloud, Loader2, Archive
 } from 'lucide-react';
 
 // --- Firebase Imports ---
@@ -110,6 +110,10 @@ const App = () => {
   const [entryMode, setEntryMode] = useState('individual');
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportMode, setExportMode] = useState('overall');
+
+  // --- Certificate States ---
+  const [certPrintTextOnly, setCertPrintTextOnly] = useState(false);
+  const [partCertMode, setPartCertMode] = useState('all_merged');
 
   const activeMeet = meets.find(m => m.id === activeMeetId) || {};
   
@@ -619,6 +623,19 @@ const App = () => {
         scriptAutoTable.onload = () => resolve(window.jspdf.jsPDF); document.head.appendChild(scriptAutoTable);
       };
       script.onerror = reject; document.head.appendChild(script);
+    });
+  };
+
+  const loadJSZip = async () => {
+    if (window.JSZip && window.saveAs) return { JSZip: window.JSZip, saveAs: window.saveAs };
+    return new Promise((resolve, reject) => {
+      const scriptZip = document.createElement('script'); scriptZip.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+      scriptZip.onload = () => {
+        const scriptSaver = document.createElement('script'); scriptSaver.src = 'https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js';
+        scriptSaver.onload = () => resolve({ JSZip: window.JSZip, saveAs: window.saveAs });
+        scriptSaver.onerror = reject; document.head.appendChild(scriptSaver);
+      };
+      scriptZip.onerror = reject; document.head.appendChild(scriptZip);
     });
   };
 
@@ -1133,6 +1150,31 @@ const App = () => {
     }
   };
 
+  const drawCertPage = (doc, en, ev, pdfWidth, pdfHeight, isTextOnly, overrideRank) => {
+    if (!isTextOnly && certBg) {
+      doc.addImage(certBg, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+    }
+
+    const name = en?.swimmerId ? swimmers.find(s=>s.id === en.swimmerId)?.name : teams.find(t=>t.id===en?.teamId)?.name + ' (ESTAFET)';
+    const org = en?.swimmerId ? swimmers.find(s=>s.id === en.swimmerId)?.org : teams.find(t=>t.id===en?.teamId)?.name;
+
+    doc.setFont("helvetica", "bold");
+
+    if (certCoords.name?.show && name) { doc.setFontSize(28); doc.text(name.toUpperCase(), certCoords.name.x, certCoords.name.y, { align: 'center' }); }
+    if (certCoords.team?.show && org) { doc.setFontSize(16); doc.text(org.toUpperCase(), certCoords.team.x, certCoords.team.y, { align: 'center' }); }
+    if (certCoords.event?.show && ev) { doc.setFontSize(14); doc.text(ev.name.toUpperCase(), certCoords.event.x, certCoords.event.y, { align: 'center' }); }
+    if (certCoords.time?.show && en?.resultTime) { doc.setFontSize(14); doc.text(en.resultTime, certCoords.time.x, certCoords.time.y, { align: 'center' }); }
+    
+    if (certCoords.rank?.show) { 
+      doc.setFontSize(18); 
+      if (overrideRank) {
+        doc.text(overrideRank, certCoords.rank.x, certCoords.rank.y, { align: 'center' }); 
+      } else if (en?.pl && parseInt(en.pl) > 0) {
+        doc.text(`JUARA ${en.pl}`, certCoords.rank.x, certCoords.rank.y, { align: 'center' }); 
+      }
+    }
+  };
+
   const handlePreviewCert = async () => {
     if (!certBg) return showDialog('Error', 'Upload background sertifikat terlebih dahulu untuk melihat preview!', 'error');
 
@@ -1144,25 +1186,31 @@ const App = () => {
       const pdfWidth = doc.internal.pageSize.getWidth();
       const pdfHeight = doc.internal.pageSize.getHeight();
 
-      doc.addImage(certBg, 'JPEG', 0, 0, pdfWidth, pdfHeight);
-      doc.setFont("helvetica", "bold");
+      // Dummy En/Ev for Preview
+      const dummyEn = { swimmerId: 'dummy', resultTime: '00:25.50', pl: 1 };
+      const dummyEv = { name: '50M GAYA BEBAS PUTRA' };
+      
+      // Override data finder for dummy
+      const dummyDrawCertPage = () => {
+        if (!certPrintTextOnly && certBg) doc.addImage(certBg, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+        doc.setFont("helvetica", "bold");
+        if (certCoords.name?.show) { doc.setFontSize(28); doc.text("NAMA ATLET CONTOH", certCoords.name.x, certCoords.name.y, { align: 'center' }); }
+        if (certCoords.team?.show) { doc.setFontSize(16); doc.text("KLUB AQUATIC CONTOH", certCoords.team.x, certCoords.team.y, { align: 'center' }); }
+        if (certCoords.event?.show) { doc.setFontSize(14); doc.text("50M GAYA BEBAS PUTRA", certCoords.event.x, certCoords.event.y, { align: 'center' }); }
+        if (certCoords.time?.show) { doc.setFontSize(14); doc.text("00:25.50", certCoords.time.x, certCoords.time.y, { align: 'center' }); }
+        if (certCoords.rank?.show) { doc.setFontSize(18); doc.text("JUARA 1", certCoords.rank.x, certCoords.rank.y, { align: 'center' }); }
+      };
 
-      // Dummy Data untuk Preview
-      if (certCoords.name?.show) { doc.setFontSize(28); doc.text("NAMA ATLET CONTOH", certCoords.name.x, certCoords.name.y, { align: 'center' }); }
-      if (certCoords.team?.show) { doc.setFontSize(16); doc.text("KLUB AQUATIC CONTOH", certCoords.team.x, certCoords.team.y, { align: 'center' }); }
-      if (certCoords.event?.show) { doc.setFontSize(14); doc.text("50M GAYA BEBAS PUTRA", certCoords.event.x, certCoords.event.y, { align: 'center' }); }
-      if (certCoords.time?.show) { doc.setFontSize(14); doc.text("00:25.50", certCoords.time.x, certCoords.time.y, { align: 'center' }); }
-      if (certCoords.rank?.show) { doc.setFontSize(18); doc.text("JUARA 1", certCoords.rank.x, certCoords.rank.y, { align: 'center' }); }
-
+      dummyDrawCertPage();
       doc.save(`Preview_Sertifikat.pdf`);
-      showDialog("Sukses", "Preview Sertifikat berhasil diunduh! Silakan cek apakah posisinya sudah pas.", "success");
+      showDialog("Sukses", "Preview Sertifikat berhasil diunduh!", "success");
     } catch (error) {
       showDialog("Error", "Gagal memproses preview PDF.", "error");
     } finally { setIsImportingSwimmers(false); setImportProgress(''); }
   };
 
   const handleGenerateCerts = async (eventId, topN) => {
-    if (!certBg) return showDialog('Error', 'Upload background sertifikat terlebih dahulu!', 'error');
+    if (!certBg && !certPrintTextOnly) return showDialog('Error', 'Upload background sertifikat terlebih dahulu!', 'error');
     if (!eventId) return showDialog('Error', 'Pilih acara lomba yang ingin dicetak.', 'error');
     
     const event = events.find(e => e.id === eventId);
@@ -1181,23 +1229,102 @@ const App = () => {
 
       evEntries.forEach((en, idx) => {
         if (idx > 0) doc.addPage();
-        doc.addImage(certBg, 'JPEG', 0, 0, pdfWidth, pdfHeight);
-
-        const name = en.swimmerId ? swimmers.find(s=>s.id === en.swimmerId)?.name : teams.find(t=>t.id===en.teamId)?.name + ' (ESTAFET)';
-        const org = en.swimmerId ? swimmers.find(s=>s.id === en.swimmerId)?.org : teams.find(t=>t.id===en.teamId)?.name;
-        
-        doc.setFont("helvetica", "bold");
-        
-        if (certCoords.name?.show) { doc.setFontSize(28); doc.text(name.toUpperCase(), certCoords.name.x, certCoords.name.y, { align: 'center' }); }
-        if (certCoords.team?.show) { doc.setFontSize(16); doc.text(org.toUpperCase(), certCoords.team.x, certCoords.team.y, { align: 'center' }); }
-        if (certCoords.event?.show) { doc.setFontSize(14); doc.text(event.name.toUpperCase(), certCoords.event.x, certCoords.event.y, { align: 'center' }); }
-        if (certCoords.time?.show) { doc.setFontSize(14); doc.text(en.resultTime, certCoords.time.x, certCoords.time.y, { align: 'center' }); }
-        if (certCoords.rank?.show) { doc.setFontSize(18); doc.text(`JUARA ${en.pl}`, certCoords.rank.x, certCoords.rank.y, { align: 'center' }); }
+        drawCertPage(doc, en, event, pdfWidth, pdfHeight, certPrintTextOnly, null);
       });
 
       doc.save(`Sertifikat_Juara_${event.name.replace(/\s+/g, '_')}.pdf`);
-      showDialog("Sukses", "Sertifikat berhasil dibuat dan diunduh!", "success");
+      showDialog("Sukses", "Sertifikat Juara berhasil dibuat dan diunduh!", "success");
     } catch (error) {
+      showDialog("Error", "Gagal memproses sertifikat PDF.", "error");
+    } finally { setIsImportingSwimmers(false); setImportProgress(''); }
+  };
+
+  const handleGenerateParticipantCerts = async () => {
+    if (!certBg && !certPrintTextOnly) return showDialog('Error', 'Upload background sertifikat terlebih dahulu!', 'error');
+    
+    setImportProgress('Menyiapkan E-Sertifikat...'); setIsImportingSwimmers(true); 
+
+    try {
+      const validEntries = entries.filter(e => e.swimmerId || e.teamId);
+      if (validEntries.length === 0) throw new Error("Belum ada data pendaftaran atlet.");
+
+      const jsPDF = await loadJsPDF();
+      let JSZip, saveAs;
+      
+      // Load JSZip jika mode bukan all_merged
+      if (partCertMode !== 'all_merged') {
+        setImportProgress('Memuat Engine ZIP...');
+        const loaded = await loadJSZip();
+        JSZip = loaded.JSZip; saveAs = loaded.saveAs;
+      }
+
+      setImportProgress('Sedang Render PDF...');
+      
+      if (partCertMode === 'all_merged') {
+        const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+        const pW = doc.internal.pageSize.getWidth(); const pH = doc.internal.pageSize.getHeight();
+        let isFirst = true;
+
+        validEntries.forEach(en => {
+          const ev = events.find(e => e.id === en.eventId);
+          if (!ev) return;
+          if (!isFirst) doc.addPage();
+          isFirst = false;
+          drawCertPage(doc, en, ev, pW, pH, certPrintTextOnly, "PESERTA");
+        });
+        doc.save(`Semua_E-Sertifikat_Peserta.pdf`);
+
+      } else if (partCertMode === 'per_person') {
+        const zip = new JSZip();
+        swimmers.forEach(sw => {
+            const swEntries = validEntries.filter(en => en.swimmerId === sw.id);
+            if(swEntries.length === 0) return;
+
+            const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+            const pW = doc.internal.pageSize.getWidth(); const pH = doc.internal.pageSize.getHeight();
+            let isFirst = true;
+            swEntries.forEach(en => {
+                const ev = events.find(e => e.id === en.eventId);
+                if (!isFirst) doc.addPage();
+                isFirst = false;
+                drawCertPage(doc, en, ev, pW, pH, certPrintTextOnly, "PESERTA");
+            });
+            const safeName = sw.name.replace(/[^a-zA-Z0-9 ]/g, '');
+            const safeOrg = sw.abbr.replace(/[^a-zA-Z0-9 ]/g, '');
+            zip.file(`${safeOrg}/${safeName}.pdf`, doc.output('blob'));
+        });
+        
+        setImportProgress('Sedang Mengkompres ZIP...');
+        const content = await zip.generateAsync({type:"blob"});
+        saveAs(content, `E-Sertifikat_Peserta_Per_Individu.zip`);
+
+      } else if (partCertMode === 'per_team') {
+        const zip = new JSZip();
+        teams.forEach(team => {
+            const tEntries = validEntries.filter(en => en.teamId === team.id || (en.swimmerId && swimmers.find(s=>s.id === en.swimmerId)?.teamId === team.id));
+            if(tEntries.length === 0) return;
+
+            const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+            const pW = doc.internal.pageSize.getWidth(); const pH = doc.internal.pageSize.getHeight();
+            let isFirst = true;
+            tEntries.forEach(en => {
+                const ev = events.find(e => e.id === en.eventId);
+                if (!isFirst) doc.addPage();
+                isFirst = false;
+                drawCertPage(doc, en, ev, pW, pH, certPrintTextOnly, "PESERTA");
+            });
+            const safeOrg = team.abbr.replace(/[^a-zA-Z0-9 ]/g, '');
+            zip.file(`Sertifikat_${safeOrg}.pdf`, doc.output('blob'));
+        });
+
+        setImportProgress('Sedang Mengkompres ZIP...');
+        const content = await zip.generateAsync({type:"blob"});
+        saveAs(content, `E-Sertifikat_Peserta_Per_Klub.zip`);
+      }
+
+      showDialog("Sukses", "Sertifikat Peserta berhasil di-generate secara massal!", "success");
+    } catch (error) {
+      console.error(error);
       showDialog("Error", "Gagal memproses sertifikat PDF.", "error");
     } finally { setIsImportingSwimmers(false); setImportProgress(''); }
   };
@@ -2525,15 +2652,21 @@ const App = () => {
 
       {reportTab === 'cert' && (
         <div className="space-y-6 animate-in fade-in">
-          <div className="px-4">
-              <h3 className="text-2xl font-black uppercase tracking-tighter text-slate-800 flex items-center gap-2"><Award className="text-indigo-500"/> Cetak Sertifikat Otomatis</h3>
-              <p className="text-slate-500 text-sm font-medium mt-1">Sistem Mail-Merge canggih PDF. Unggah template gambar kosong Anda, atur posisi teks, dan generate!</p>
+          <div className="px-4 flex justify-between items-start">
+              <div>
+                <h3 className="text-2xl font-black uppercase tracking-tighter text-slate-800 flex items-center gap-2"><Award className="text-indigo-500"/> Cetak Sertifikat Otomatis</h3>
+                <p className="text-slate-500 text-sm font-medium mt-1">Sistem Mail-Merge canggih PDF. Bisa cetak full-desain, atau mencetak tulisan saja ke atas blangko fisik.</p>
+              </div>
+              <label className="flex items-center gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-sm cursor-pointer hover:bg-slate-50 transition active:scale-95">
+                <input type="checkbox" checked={certPrintTextOnly} onChange={(e) => setCertPrintTextOnly(e.target.checked)} className="w-5 h-5 rounded text-indigo-600 focus:ring-indigo-500"/>
+                <span className="text-xs font-black uppercase tracking-widest text-slate-700">Mode Teks Saja (Blangko)</span>
+              </label>
           </div>
           
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
               <div className="lg:col-span-5 space-y-6">
                 <div className="bg-white p-6 rounded-[2rem] border shadow-sm space-y-4">
-                    <h4 className="font-black text-sm uppercase text-slate-800 tracking-widest border-b pb-3">1. Upload Background (JPG/PNG)</h4>
+                    <h4 className="font-black text-sm uppercase text-slate-800 tracking-widest border-b pb-3">1. Upload Background (Opsional)</h4>
                     <input type="file" accept="image/*" onChange={handleCertBgUpload} className="hidden" id="cert-upload"/>
                     <label htmlFor="cert-upload" className="w-full h-32 border-2 border-dashed border-indigo-200 rounded-2xl bg-indigo-50 text-indigo-500 flex flex-col items-center justify-center cursor-pointer hover:bg-indigo-100 transition">
                       <FileImage size={32} className="mb-2"/>
@@ -2543,55 +2676,54 @@ const App = () => {
                 </div>
 
                 <div className="bg-white p-6 rounded-[2rem] border shadow-sm space-y-4">
-                    <h4 className="font-black text-sm uppercase text-slate-800 tracking-widest border-b pb-3">2. Cetak ke PDF</h4>
+                    <h4 className="font-black text-sm uppercase text-yellow-600 tracking-widest border-b pb-3">Cetak Sertifikat JUARA</h4>
                     <form onSubmit={(e) => { e.preventDefault(); const formData = new FormData(e.target); handleGenerateCerts(formData.get('eventId'), parseInt(formData.get('topN'))); }} className="space-y-4">
                       <div>
                         <label className="text-[10px] font-black text-slate-400 uppercase ml-1 block mb-1">Pilih Acara</label>
-                        <select name="eventId" className="w-full p-3 bg-slate-50 border rounded-xl font-bold focus:ring-2 focus:ring-indigo-500 outline-none text-sm" required>
+                        <select name="eventId" className="w-full p-3 bg-slate-50 border rounded-xl font-bold focus:ring-2 focus:ring-yellow-500 outline-none text-sm" required>
                           {events.map(ev => <option key={ev.id} value={ev.id}>Event {events.indexOf(ev)+1} - {ev.distance}m {ev.stroke} {ev.gender} {ev.category}</option>)}
                         </select>
                       </div>
                       <div>
-                        <label className="text-[10px] font-black text-slate-400 uppercase ml-1 block mb-1">Cetak Untuk</label>
-                        <select name="topN" className="w-full p-3 bg-slate-50 border rounded-xl font-bold focus:ring-2 focus:ring-indigo-500 outline-none text-sm">
+                        <label className="text-[10px] font-black text-slate-400 uppercase ml-1 block mb-1">Cetak Untuk Peringkat</label>
+                        <select name="topN" className="w-full p-3 bg-slate-50 border rounded-xl font-bold focus:ring-2 focus:ring-yellow-500 outline-none text-sm">
                           <option value="3">Top 3 (Peraih Medali)</option>
                           <option value="8">Top 8 (Finalis)</option>
                           <option value="20">Top 20</option>
                         </select>
                       </div>
-                      <button type="submit" className="w-full bg-indigo-600 text-white p-4 rounded-xl font-black uppercase hover:bg-indigo-700 shadow-md transition active:scale-95 flex items-center justify-center gap-2"><Award size={18}/> Generate Sertifikat</button>
+                      <button type="submit" className="w-full bg-yellow-500 text-white p-4 rounded-xl font-black uppercase hover:bg-yellow-600 shadow-md transition active:scale-95 flex items-center justify-center gap-2"><Trophy size={18}/> Generate Juara</button>
                     </form>
+                </div>
+
+                <div className="bg-white p-6 rounded-[2rem] border shadow-sm space-y-4">
+                    <h4 className="font-black text-sm uppercase text-blue-600 tracking-widest border-b pb-3">Cetak Sertifikat PESERTA (Massal)</h4>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="text-[10px] font-black text-slate-400 uppercase ml-1 block mb-1">Metode Ekspor File</label>
+                        <select className="w-full p-3 bg-slate-50 border rounded-xl font-bold focus:ring-2 focus:ring-blue-500 outline-none text-sm" value={partCertMode} onChange={(e) => setPartCertMode(e.target.value)}>
+                          <option value="all_merged">1 File PDF (Semua Peserta Digabung)</option>
+                          <option value="per_person">ZIP: Pisah 1 PDF untuk Tiap Atlet</option>
+                          <option value="per_team">ZIP: Pisah 1 PDF untuk Tiap Tim/Klub</option>
+                        </select>
+                      </div>
+                      <button onClick={handleGenerateParticipantCerts} disabled={isImportingSwimmers} className={`w-full bg-blue-600 text-white p-4 rounded-xl font-black uppercase hover:bg-blue-700 shadow-md transition active:scale-95 flex items-center justify-center gap-2 ${isImportingSwimmers ? 'opacity-50' : ''}`}>
+                         {isImportingSwimmers ? <Loader2 size={18} className="animate-spin" /> : (partCertMode === 'all_merged' ? <FileText size={18}/> : <Archive size={18}/>)}
+                         {isImportingSwimmers ? importProgress : 'Generate E-Sertifikat'}
+                      </button>
+                    </div>
                 </div>
               </div>
 
               <div className="lg:col-span-7 bg-white p-6 rounded-[2rem] border shadow-sm h-fit">
-                <h4 className="font-black text-sm uppercase text-slate-800 tracking-widest border-b pb-3 mb-6">3. Kalibrasi Koordinat Posisi Teks</h4>
-                <div className="space-y-4">
-                  {['name', 'team', 'event', 'time', 'rank'].map(key => (
-                    <div key={key} className="flex items-center gap-4 p-3 bg-slate-50 rounded-xl border border-slate-100">
-                        <div className="w-24">
-                          <span className="text-[10px] font-black text-slate-400 uppercase block mb-1">Elemen</span>
-                          <span className="font-black text-slate-700 uppercase text-xs">{key === 'name' ? 'Nama Atlet' : key === 'team' ? 'Nama Klub' : key === 'event' ? 'Nama Lomba' : key === 'time' ? 'Waktu' : 'Peringkat'}</span>
-                        </div>
-                        <label className="flex items-center gap-2 cursor-pointer">
-                          <input type="checkbox" checked={certCoords[key]?.show} onChange={(e) => updateActiveMeet({ certCoords: { ...certCoords, [key]: { ...certCoords[key], show: e.target.checked } } })} className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500"/>
-                          <span className="text-xs font-bold text-slate-500">Tampilkan</span>
-                        </label>
-                        <div className="flex-1 flex gap-2">
-                          <div className="flex items-center bg-white border rounded-lg px-2 flex-1"><span className="text-[10px] font-black text-slate-400 mr-2">X:</span><input type="number" value={certCoords[key]?.x} onChange={(e) => updateActiveMeet({ certCoords: { ...certCoords, [key]: { ...certCoords[key], x: parseInt(e.target.value) || 0 } } })} className="w-full py-1 text-center font-bold text-sm outline-none bg-transparent" disabled={!certCoords[key]?.show}/></div>
-                          <div className="flex items-center bg-white border rounded-lg px-2 flex-1"><span className="text-[10px] font-black text-slate-400 mr-2">Y:</span><input type="number" value={certCoords[key]?.y} onChange={(e) => updateActiveMeet({ certCoords: { ...certCoords, [key]: { ...certCoords[key], y: parseInt(e.target.value) || 0 } } })} className="w-full py-1 text-center font-bold text-sm outline-none bg-transparent" disabled={!certCoords[key]?.show}/></div>
-                        </div>
-                    </div>
-                  ))}
-                </div>
-                
+                <h4 className="font-black text-sm uppercase text-slate-800 tracking-widest border-b pb-3 mb-6">2. Kalibrasi Koordinat Posisi Teks</h4>
                 {/* Live Preview Canvas */}
-                {certBg && (
-                  <div className="mt-8 mb-6 border-2 border-slate-200 rounded-xl overflow-hidden bg-slate-100 relative w-full shadow-inner group" style={{ aspectRatio: '297/210' }}>
+                {(certBg || certPrintTextOnly) && (
+                  <div className={`mt-8 mb-6 border-2 border-slate-200 rounded-xl overflow-hidden relative w-full shadow-inner group ${certPrintTextOnly ? 'bg-white' : 'bg-slate-100'}`} style={{ aspectRatio: '297/210' }}>
                     <div className="absolute top-2 left-2 bg-black/60 text-white text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-lg backdrop-blur-sm z-10 flex items-center gap-2">
-                      <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span> Live Preview
+                      <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></span> Live Preview {certPrintTextOnly && "(Teks Saja)"}
                     </div>
-                    <img src={certBg} alt="Certificate Background" className="absolute inset-0 w-full h-full object-cover" />
+                    {!certPrintTextOnly && certBg && <img src={certBg} alt="Certificate Background" className="absolute inset-0 w-full h-full object-cover" />}
                     
                     {certCoords.name?.show && (
                       <div className="absolute font-bold text-slate-800 text-xl md:text-2xl whitespace-nowrap" style={{ left: `${(certCoords.name.x / 297) * 100}%`, top: `${(certCoords.name.y / 210) * 100}%`, transform: 'translate(-50%, -100%)' }}>
