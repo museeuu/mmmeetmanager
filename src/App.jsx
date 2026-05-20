@@ -35,7 +35,7 @@ const App = () => {
   const [user, setUser] = useState(null);
   const [role, setRole] = useState(null); 
   const [passwordInput, setPasswordInput] = useState('');
-  const [masterPassword] = useState('123456');
+  const [masterPassword, setMasterPassword] = useState('123456');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [superView, setSuperView] = useState('meets'); 
   
@@ -378,7 +378,7 @@ const App = () => {
         teamId: isRelayMode ? selectedEntryEntity.id : null,
         seedTime: seedTime || '99:99.99', 
         resultTime: '', status: '', standardPoints: 0, alternativePoints: 0, pl: '', hpl: '', heat: 0, lane: 0,
-        isSparring: false // Menambahkan flag sparring
+        isSparring: false
       };
       updateActiveMeet({ entries: [...entries, newEntry] });
     }
@@ -408,20 +408,15 @@ const App = () => {
     events.forEach(event => {
       let eventEntries = updatedEntries.filter(en => en.eventId === event.id);
       
-      // Pisahkan yang memiliki seed time dengan yang tidak (99:99.99 atau NT)
       const noTimeEntries = eventEntries.filter(en => !en.seedTime || en.seedTime === '99:99.99' || en.seedTime.toLowerCase() === 'nt');
       const seededEntries = eventEntries.filter(en => en.seedTime && en.seedTime !== '99:99.99' && en.seedTime.toLowerCase() !== 'nt');
 
-      // Acak urutan (shuffle) perenang yang tidak memiliki seed time
       for (let i = noTimeEntries.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * (i + 1));
           [noTimeEntries[i], noTimeEntries[j]] = [noTimeEntries[j], noTimeEntries[i]];
       }
 
-      // Urutkan perenang yang memiliki seed time dari tercepat (waktu terkecil) ke terlambat
       seededEntries.sort((a, b) => a.seedTime.localeCompare(b.seedTime));
-
-      // Gabungkan kembali
       eventEntries = [...seededEntries, ...noTimeEntries];
 
       const totalSwimmers = eventEntries.length;
@@ -429,11 +424,9 @@ const App = () => {
 
       const numHeats = Math.ceil(totalSwimmers / laneCount);
 
-      // Algoritma Seeding (Mengisi dari heat terakhir/tercepat mundur ke heat pertama)
       eventEntries.forEach((entry, index) => {
         const heatIndexFromEnd = Math.floor(index / laneCount);
         const heatNum = numHeats - heatIndexFromEnd;
-        
         const indexInHeat = index % laneCount;
         
         let lanes = [];
@@ -504,7 +497,6 @@ const App = () => {
       return;
     }
 
-    // Pisahkan Perenang Reguler dan Sparring/Exhibition
     const validRegular = eventEntriesAll.filter(en => en.resultTime && !en.status && !en.isSparring);
     const validSparring = eventEntriesAll.filter(en => en.resultTime && !en.status && en.isSparring);
 
@@ -517,16 +509,13 @@ const App = () => {
           return { ...en, standardPoints: 0, alternativePoints: 0, pl: '-', hpl: '-' };
         }
         
-        // HPL (Heat Placement) tetap dihitung gabungan dalam 1 heat
         const heatEntries = eventEntriesAll.filter(heatEn => heatEn.heat === en.heat && heatEn.resultTime && !heatEn.status);
         heatEntries.sort((a,b) => a.resultTime.localeCompare(b.resultTime));
         const heatRank = heatEntries.findIndex(sorted => sorted.id === en.id) + 1;
 
         if (en.isSparring) {
-          // Sparring: Poin 0, PL jadi 'X'
           return { ...en, standardPoints: 0, alternativePoints: 0, pl: 'X', hpl: heatRank };
         } else {
-          // Reguler: Hitung Poin Normal
           const rank = validRegular.findIndex(sorted => sorted.id === en.id);
           const stdPts = rank < 20 ? scoringTable.standard[rank] : 0;
           const altPts = rank < 20 ? scoringTable.alternative[rank] : 0;
@@ -641,7 +630,6 @@ const App = () => {
 
   const handleExportEventListPDF = async () => {
     if (events.length === 0) return showDialog("Kosong", "Belum ada acara lomba yang didaftarkan.", "warning");
-    
     setImportProgress('Men-generate PDF...'); setIsImporting(true);
 
     try {
@@ -649,7 +637,6 @@ const App = () => {
       const doc = new jsPDF();
       let finalY = 15;
 
-      // Header
       doc.setFontSize(14); doc.setFont("helvetica", "bold");
       doc.text(`${meetInfo.name.toUpperCase()} - ${meetInfo.date}`, 105, finalY, { align: "center" });
       finalY += 6;
@@ -657,7 +644,6 @@ const App = () => {
       doc.text("Event List - By Event Number", 105, finalY, { align: "center" });
       finalY += 10;
 
-      // Persiapkan data untuk 2 kolom
       const tableData = [];
       const halfLength = Math.ceil(events.length / 2);
       
@@ -828,7 +814,6 @@ const App = () => {
           ws['!cols'] = [{wch: 8}, {wch: 40}, {wch: 8}, {wch: 15}, {wch: 15}];
           XLSX.utils.book_append_sheet(wb, ws, "Psych Sheet");
         } else {
-          // Per Team
           teams.forEach(team => {
             const teamEntries = entries.filter(en => {
               if (en.teamId === team.id) return true;
@@ -841,7 +826,6 @@ const App = () => {
 
             if (teamEntries.length === 0) return;
 
-            // Sort entries by Event Index
             teamEntries.sort((a, b) => {
               const eA = events.findIndex(e => e.id === a.eventId);
               const eB = events.findIndex(e => e.id === b.eventId);
@@ -864,7 +848,6 @@ const App = () => {
             const ws = XLSX.utils.aoa_to_sheet(aoa);
             ws['!cols'] = [{wch: 25}, {wch: 40}, {wch: 15}, {wch: 10}, {wch: 15}];
             
-            // Handle duplicate sheet names or too long
             let sheetName = team.abbr.replace(/[^a-zA-Z0-9]/g, '').substring(0, 31);
             if (!sheetName) sheetName = "Team";
             
@@ -888,7 +871,6 @@ const App = () => {
         showDialog("Sukses", `Excel berhasil dibuat!`, "success");
 
       } else {
-        // PDF Export
         const jsPDF = await loadJsPDF();
         const doc = new jsPDF();
         let finalY = 20;
@@ -936,7 +918,6 @@ const App = () => {
             finalY = doc.lastAutoTable.finalY + 10;
           });
         } else {
-          // Per Team PDF
           let isFirstTeam = true;
           teams.forEach(team => {
             const teamEntries = entries.filter(en => {
@@ -964,7 +945,6 @@ const App = () => {
             doc.text(`Entry List - ${team.name}`, 105, finalY, { align: "center" });
             finalY += 15;
 
-            // Sort entries by Event Index
             teamEntries.sort((a, b) => {
               const eA = events.findIndex(e => e.id === a.eventId);
               const eB = events.findIndex(e => e.id === b.eventId);
@@ -1032,19 +1012,15 @@ const App = () => {
     const modeSuffix = includePoints ? 'Scores' : 'Results';
     const eventNameFull = `Event ${eIdx + 1} - ${activeEvent.distance}m Gaya ${activeEvent.stroke} ${activeEvent.gender} ${activeEvent.category} ${activeEvent.type === 'Estafet' ? '(ESTAFET)' : ''}`;
 
-    // Sorting Khusus: Reguler (1,2,3) -> Sparring ('X') -> Status (DQ, NT)
     const sortedEntries = [...eventEntries].sort((a, b) => {
-      // 1. Status selalu di paling bawah
       if (a.status && !b.status) return 1;
       if (!a.status && b.status) return -1;
       
-      // 2. Sparring ('X') berada di bawah Reguler tapi di atas Status
       const aIsSparring = a.isSparring || a.pl === 'X';
       const bIsSparring = b.isSparring || b.pl === 'X';
       if (!aIsSparring && bIsSparring) return -1;
       if (aIsSparring && !bIsSparring) return 1;
 
-      // 3. Jika sama-sama reguler / sama-sama sparring, urutkan berdasarkan waktu
       if (a.resultTime && b.resultTime) return a.resultTime.localeCompare(b.resultTime);
       return 0;
     });
@@ -1140,6 +1116,98 @@ const App = () => {
     });
   };
 
+  const handleExportFullResultsPDF = async () => {
+    setImportProgress('Men-generate Full Results...'); 
+    setIsImportingSwimmers(true); 
+
+    try {
+      const jsPDF = await loadJsPDF(); 
+      const doc = new jsPDF(); 
+      let finalY = 20;
+
+      doc.setFontSize(16); doc.setFont("helvetica", "bold"); 
+      doc.text(meetInfo.name.toUpperCase(), 105, finalY, { align: "center" });
+      finalY += 8; 
+      doc.setFontSize(12); doc.setFont("helvetica", "normal"); 
+      doc.text("FULL MEET RESULTS", 105, finalY, { align: "center" });
+      finalY += 15;
+
+      let hasData = false;
+
+      events.forEach((activeEvent, eIdx) => {
+        const eventEntries = entries.filter(e => e.eventId === activeEvent.id && (e.resultTime || e.status));
+        if (eventEntries.length === 0) return;
+        hasData = true;
+
+        const eventNameFull = `Event ${eIdx + 1} - ${activeEvent.distance}m Gaya ${activeEvent.stroke} ${activeEvent.gender} ${activeEvent.category} ${activeEvent.type === 'Estafet' ? '(ESTAFET)' : ''}`;
+
+        const sortedEntries = [...eventEntries].sort((a, b) => {
+          if (a.status && !b.status) return 1;
+          if (!a.status && b.status) return -1;
+          
+          const aIsSparring = a.isSparring || a.pl === 'X';
+          const bIsSparring = b.isSparring || b.pl === 'X';
+          if (!aIsSparring && bIsSparring) return -1;
+          if (aIsSparring && !bIsSparring) return 1;
+
+          if (a.resultTime && b.resultTime) return a.resultTime.localeCompare(b.resultTime);
+          return 0;
+        });
+
+        if (finalY > 260) { doc.addPage(); finalY = 20; }
+
+        doc.setFontSize(11); doc.setFont("helvetica", "bold"); 
+        doc.text(eventNameFull, 14, finalY);
+        finalY += 2; doc.setLineWidth(0.5); doc.line(14, finalY, 196, finalY); finalY += 4;
+
+        const tableData = sortedEntries.map(en => {
+          const name = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.name.toUpperCase() : teams.find(t => t.id === en.teamId)?.name.toUpperCase() + ' (A)';
+          const age = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.age?.toString() : '';
+          const org = en.swimmerId ? swimmers.find(s => s.id === en.swimmerId)?.org.toUpperCase() : teams.find(t => t.id === en.teamId)?.abbr.toUpperCase();
+          
+          let displayTime = en.status ? en.status : en.resultTime;
+          if (en.isSparring && en.resultTime && !en.status) displayTime = `X ${en.resultTime}`;
+
+          const pts = leaderboardMode === 'standard' ? en.standardPoints : en.alternativePoints; 
+          return [ en.status ? en.status : (en.pl || '-'), name || '', age || '', org || '', en.seedTime || 'NT', displayTime, pts > 0 ? pts.toString() : '-' ];
+        });
+
+        const head = [['Place', 'Name/Team', 'Age', 'Team', 'Seed Time', 'Finals', 'Pts']];
+        const colStyles = { 0: { cellWidth: 15, halign: 'center' }, 1: { cellWidth: 55 }, 2: { cellWidth: 15, halign: 'center' }, 3: { cellWidth: 40 }, 4: { cellWidth: 20, halign: 'center' }, 5: { cellWidth: 20, halign: 'center' }, 6: { cellWidth: 15, halign: 'center' } };
+
+        doc.autoTable({
+          startY: finalY, head: head, body: tableData, theme: 'plain', styles: { fontSize: 9, cellPadding: 1 }, headStyles: { fontStyle: 'bold', lineWidth: { bottom: 0.5 }, lineColor: [0, 0, 0] }, columnStyles: colStyles,
+          didDrawPage: function (data) { finalY = data.cursor.y; }
+        });
+        
+        finalY = doc.lastAutoTable.finalY + 10;
+      });
+
+      if (!hasData) {
+         doc.setFontSize(11); doc.setFont("helvetica", "normal");
+         doc.text("Belum ada hasil yang diinput.", 105, finalY + 20, { align: "center" });
+      }
+
+      const pageCount = doc.internal.getNumberOfPages();
+      const now = new Date(); const timeStr = now.toLocaleTimeString('id-ID', { hour12: false });
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      const dateStr = `${now.getDate().toString().padStart(2, '0')}-${months[now.getMonth()]}-${now.getFullYear()}`;
+      const printStamp = `MMMeet Manager - ${timeStr} ${dateStr}`;
+
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i); doc.setFontSize(8); doc.setFont("helvetica", "normal"); doc.setTextColor(100, 100, 100); 
+        doc.text(printStamp, 14, 10); doc.text(`Halaman ${i}`, 196, 10, { align: "right" });
+      }
+
+      doc.save(`Full_Results_${meetInfo.name.replace(/\s+/g, '_')}.pdf`);
+      showDialog("Sukses", `Full Results PDF berhasil dibuat!`, "success");
+    } catch (error) { 
+      showDialog("Error", "Gagal men-generate PDF.", "error"); 
+    } finally { 
+      setIsImportingSwimmers(false); setImportProgress(''); 
+    }
+  };
+
   // --- Certificate Generator ---
   const handleCertBgUpload = (e) => {
     const file = e.target.files[0];
@@ -1177,7 +1245,6 @@ const App = () => {
 
   const handlePreviewCert = async () => {
     if (!certBg) return showDialog('Error', 'Upload background sertifikat terlebih dahulu untuk melihat preview!', 'error');
-
     setImportProgress('Membuat Preview...'); setIsImportingSwimmers(true);
 
     try {
@@ -1186,11 +1253,6 @@ const App = () => {
       const pdfWidth = doc.internal.pageSize.getWidth();
       const pdfHeight = doc.internal.pageSize.getHeight();
 
-      // Dummy En/Ev for Preview
-      const dummyEn = { swimmerId: 'dummy', resultTime: '00:25.50', pl: 1 };
-      const dummyEv = { name: '50M GAYA BEBAS PUTRA' };
-      
-      // Override data finder for dummy
       const dummyDrawCertPage = () => {
         if (!certPrintTextOnly && certBg) doc.addImage(certBg, 'JPEG', 0, 0, pdfWidth, pdfHeight);
         doc.setFont("helvetica", "bold");
@@ -1218,7 +1280,6 @@ const App = () => {
     evEntries.sort((a,b) => a.pl - b.pl);
 
     if (evEntries.length === 0) return showDialog('Kosong', `Belum ada juara (Top ${topN}) di acara ini yang sudah ter-score.`, 'warning');
-
     setImportProgress('Men-generate Sertifikat...'); setIsImportingSwimmers(true); 
 
     try {
@@ -1241,7 +1302,6 @@ const App = () => {
 
   const handleGenerateParticipantCerts = async () => {
     if (!certBg && !certPrintTextOnly) return showDialog('Error', 'Upload background sertifikat terlebih dahulu!', 'error');
-    
     setImportProgress('Menyiapkan E-Sertifikat...'); setIsImportingSwimmers(true); 
 
     try {
@@ -1251,7 +1311,6 @@ const App = () => {
       const jsPDF = await loadJsPDF();
       let JSZip, saveAs;
       
-      // Load JSZip jika mode bukan all_merged
       if (partCertMode !== 'all_merged') {
         setImportProgress('Memuat Engine ZIP...');
         const loaded = await loadJSZip();
@@ -1454,7 +1513,6 @@ const App = () => {
       const validRows = []; let duplicateEntryCount = 0; let missingEventCount = 0; let invalidAgeCount = 0;
       const unmatchedEventsList = new Set(); const invalidAgeNames = new Set(); const currentMeetYear = new Date(meetInfo.date).getFullYear();
 
-      // Tahap 1: Inspeksi dan Validasi (STRICT MODE)
       const totalRows = jsonData.length - headerIdx - 1;
       for (let i = headerIdx + 1; i < jsonData.length; i++) {
         if (i % 50 === 0) { setImportProgress(`Inspeksi ${i - headerIdx} / ${totalRows}...`); await new Promise(resolve => setTimeout(resolve, 5)); }
@@ -1504,7 +1562,6 @@ const App = () => {
         }
       }
 
-      // Tahap 2: Eksekusi
       setImportProgress('Menyimpan Data...'); await new Promise(resolve => setTimeout(resolve, 100)); 
       const newTeamsToAdd = []; const newSwimmersToAdd = []; const newEntriesToAdd = [];
 
@@ -1531,13 +1588,9 @@ const App = () => {
 
       if (newTeamsToAdd.length > 0 || newSwimmersToAdd.length > 0 || newEntriesToAdd.length > 0) {
         updateActiveMeet({ teams: [...teams, ...newTeamsToAdd], swimmers: [...swimmers, ...newSwimmersToAdd], entries: [...entries, ...newEntriesToAdd] });
-        const uniqueNewNames = Array.from(new Set(newSwimmersToAdd.map(s => s.name))); let displayNames = uniqueNewNames.slice(0, 5).join(', ');
-        if (uniqueNewNames.length > 5) displayNames += `, dan ${uniqueNewNames.length - 5} lainnya`;
-
-        let msg = '';
-        if (newTeamsToAdd.length > 0) msg += `• ${newTeamsToAdd.length} Klub/Tim baru terdeteksi & didaftarkan otomatis.\n`;
-        msg += `• ${newSwimmersToAdd.length} Biodata Atlet berhasil masuk.\n`; msg += `• ${newEntriesToAdd.length} Pendaftaran Acara berhasil masuk.`;
-        if (duplicateEntryCount > 0) msg += `\n\n[Dicegah] ${duplicateEntryCount} Pendaftaran Ganda/Double diabaikan.`;
+        let msg = `• ${newSwimmersToAdd.length} Biodata Atlet berhasil masuk.\n• ${newEntriesToAdd.length} Pendaftaran Acara berhasil masuk.`;
+        if (newTeamsToAdd.length > 0) msg = `• ${newTeamsToAdd.length} Klub/Tim baru terdaftar otomatis.\n` + msg;
+        if (duplicateEntryCount > 0) msg += `\n\n[Dicegah] ${duplicateEntryCount} Pendaftaran Ganda diabaikan.`;
         if (missingEventCount > 0) msg += `\n[Tolak] ${missingEventCount} Baris dibuang karena acara belum dibuat di Setup:\n${Array.from(unmatchedEventsList).join('\n')}`;
         if (invalidAgeCount > 0) msg += `\n[Tolak] ${invalidAgeCount} Baris dibuang karena Umur tidak valid/TIDAK MASUK KU:\n${Array.from(invalidAgeNames).join(', ')}`;
         
@@ -1715,7 +1768,7 @@ const App = () => {
               return (
                 <div key={meet.id} className="grid grid-cols-12 p-5 items-center hover:bg-slate-50 transition group">
                   <div className="col-span-4">
-                    <h3 className="font-black text-lg text-slate-800">{meet.meetInfo.name}</h3>
+                    <h3 className="font-black text-lg text-slate-800 uppercase">{meet.meetInfo.name}</h3>
                     <div className="text-[10px] text-slate-400 font-bold uppercase mt-1 flex items-center gap-2"><span>ID: {meet.id.split('-')[1]}</span><span className="bg-slate-100 px-2 py-0.5 rounded text-slate-600">PIN Admin: {meet.adminPin}</span></div>
                   </div>
                   <div className="col-span-3 text-center">
@@ -1724,7 +1777,7 @@ const App = () => {
                   </div>
                   <div className="col-span-2 text-center">
                     <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${meet.isSeeded ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>{meetStatus}</span>
-                    <div className="text-[10px] text-slate-400 font-bold mt-2 uppercase">{meet.swimmers.length} Atlet • {meet.events.length} Lomba</div>
+                    <div className="text-[10px] text-slate-400 font-bold mt-2 uppercase">{(meet.swimmers || []).length} Atlet • {(meet.events || []).length} Lomba</div>
                   </div>
                   <div className="col-span-3 flex justify-end gap-3">
                     <button onClick={() => deleteMeet(meet.id)} className="text-red-400 hover:text-red-600 p-2 hover:bg-red-50 rounded-lg transition"><Trash2 size={20}/></button>
@@ -2435,6 +2488,7 @@ const App = () => {
                   <button className="bg-[#dfdfdf] border border-slate-500 px-3 py-1 text-[10px] font-bold shadow-[inset_1px_1px_0_#fff,inset_-1px_-1px_0_#888] active:shadow-[inset_1px_1px_0_#888,inset_-1px_-1px_0_#fff]" onClick={() => calculatePoints(runEventId)}>Score : Ctrl-S</button>
                   <button className="bg-[#dfdfdf] border border-slate-500 px-3 py-1 text-[10px] font-bold shadow-[inset_1px_1px_0_#fff,inset_-1px_-1px_0_#888] active:shadow-[inset_1px_1px_0_#888,inset_-1px_-1px_0_#fff] text-blue-700" onClick={() => promptExportFormat(runEventId, false)}>Gen. Result</button>
                   <button className="bg-[#dfdfdf] border border-slate-500 px-3 py-1 text-[10px] font-bold shadow-[inset_1px_1px_0_#fff,inset_-1px_-1px_0_#888] active:shadow-[inset_1px_1px_0_#888,inset_-1px_-1px_0_#fff] text-red-700" onClick={() => promptExportFormat(runEventId, true)}>Gen. Score</button>
+                  <button className="bg-[#dfdfdf] border border-slate-500 px-3 py-1 text-[10px] font-bold shadow-[inset_1px_1px_0_#fff,inset_-1px_-1px_0_#888] active:shadow-[inset_1px_1px_0_#888,inset_-1px_-1px_0_#fff] text-purple-700" onClick={handleExportFullResultsPDF}>Full Results</button>
                 </div>
             </div>
 
@@ -2717,7 +2771,6 @@ const App = () => {
 
               <div className="lg:col-span-7 bg-white p-6 rounded-[2rem] border shadow-sm h-fit">
                 <h4 className="font-black text-sm uppercase text-slate-800 tracking-widest border-b pb-3 mb-6">2. Kalibrasi Koordinat Posisi Teks</h4>
-                {/* Live Preview Canvas */}
                 {(certBg || certPrintTextOnly) && (
                   <div className={`mt-8 mb-6 border-2 border-slate-200 rounded-xl overflow-hidden relative w-full shadow-inner group ${certPrintTextOnly ? 'bg-white' : 'bg-slate-100'}`} style={{ aspectRatio: '297/210' }}>
                     <div className="absolute top-2 left-2 bg-black/60 text-white text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-lg backdrop-blur-sm z-10 flex items-center gap-2">
@@ -2875,36 +2928,9 @@ const App = () => {
         <div className="absolute top-0 left-0 w-full h-64 bg-slate-900 -z-10 rounded-b-[4rem]"></div>
         
         {activeMeetId === null ? (
-          <div className="max-w-6xl mx-auto space-y-10 pb-20 animate-in fade-in">
-            <div className="flex justify-between items-end mb-6">
-                <h2 className="text-2xl font-black text-white tracking-tight flex items-center gap-2"><Cloud className="text-blue-500"/> Kejuaraan Online</h2>
-                <button onClick={() => setShowNewMeetModal(true)} className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-3 rounded-xl font-black uppercase tracking-widest text-xs shadow-xl active:scale-95 transition flex items-center gap-2"><Plus size={16}/> Buat Baru</button>
-            </div>
-            
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-                <div className="grid grid-cols-12 bg-slate-50 p-5 border-b border-slate-200 text-xs font-black uppercase text-slate-400 tracking-widest">
-                  <div className="col-span-8">Nama Kejuaraan</div><div className="col-span-4 text-right">Aksi</div>
-                </div>
-                <div className="divide-y divide-slate-100">
-                  {meets.map(meet => (
-                    <div key={meet.id} className="grid grid-cols-12 p-5 items-center hover:bg-slate-50 transition group">
-                      <div className="col-span-8">
-                        <h3 className="font-black text-lg text-slate-800 uppercase">{meet.meetInfo.name}</h3>
-                        <div className="text-[10px] text-slate-400 font-bold mt-1 uppercase flex items-center gap-2"><span>ID: {meet.id}</span><span className="bg-slate-100 px-2 py-0.5 rounded text-slate-600">PIN: {meet.adminPin}</span></div>
-                      </div>
-                      <div className="col-span-4 flex justify-end gap-3">
-                        <button onClick={() => deleteMeet(meet.id)} className="text-red-300 hover:text-red-600 p-2 transition"><Trash2 size={18}/></button>
-                        <button onClick={() => { setActiveMeetId(meet.id); setActiveTab('dashboard'); }} className="bg-blue-600 text-white font-black text-xs uppercase px-5 py-2.5 rounded-xl shadow-lg hover:bg-blue-700 transition active:scale-95">Buka Lomba</button>
-                      </div>
-                    </div>
-                  ))}
-                  {meets.length === 0 && <div className="p-20 text-center text-slate-300 font-black uppercase tracking-widest">Belum ada lomba di Cloud</div>}
-                </div>
-            </div>
-          </div>
+          superView === 'main_db' ? renderMainDatabase() : renderSuperuserDashboard()
         ) : (
           <div className="p-6 bg-white rounded-3xl shadow-xl min-h-[400px]">
-            {/* Konten akan menyesuaikan dengan tab yang dipilih */}
             {activeTab === 'dashboard' && renderDashboard()}
             {activeTab === 'master-setup' && renderMasterSetup()}
             {activeTab === 'teams' && renderTeams()}
@@ -2982,6 +3008,32 @@ const App = () => {
                 <button onClick={() => handleExportPsychSheet(exportMode, 'xlsx')} className="bg-emerald-600 text-white p-4 rounded-2xl font-black uppercase shadow-xl shadow-emerald-200 hover:bg-emerald-700 transition active:scale-95 flex items-center justify-center gap-2"><Layout size={18}/> Format Excel</button>
               </div>
               <button onClick={() => setShowExportModal(false)} className="w-full p-4 rounded-2xl font-black uppercase text-slate-500 hover:bg-slate-100 transition mt-2">Batal</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      { }
+      {/* Change PIN Master Modal */}
+      {showChangePinModal && (
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-50 flex items-center justify-center p-6">
+          <div className="bg-white w-full max-w-md rounded-[2rem] p-10 shadow-2xl animate-in zoom-in border border-slate-100">
+            <h3 className="text-2xl font-black mb-6 uppercase tracking-tighter text-slate-800">Ubah PIN Master</h3>
+            <div className="space-y-4">
+              <input type="password" id="newMasterPin" className="w-full p-4 bg-slate-50 border rounded-2xl font-bold focus:ring-2 focus:ring-blue-500 outline-none" placeholder="PIN Master Baru" />
+              <div className="flex gap-2 pt-6">
+                <button type="button" onClick={() => setShowChangePinModal(false)} className="flex-1 p-4 rounded-2xl font-black uppercase text-slate-500 hover:bg-slate-100 transition">Batal</button>
+                <button type="button" onClick={() => {
+                  const val = document.getElementById('newMasterPin').value;
+                  if (val) {
+                    setMasterPassword(val);
+                    setShowChangePinModal(false);
+                    showDialog("Sukses", "PIN Master berhasil diperbarui secara lokal!", "success");
+                  } else {
+                    showDialog("Gagal", "PIN tidak boleh kosong.", "error");
+                  }
+                }} className="flex-1 bg-blue-600 text-white p-4 rounded-2xl font-black uppercase shadow-xl hover:bg-blue-700 transition">Simpan</button>
+              </div>
             </div>
           </div>
         </div>
