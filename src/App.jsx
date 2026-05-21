@@ -408,15 +408,20 @@ const App = () => {
     events.forEach(event => {
       let eventEntries = updatedEntries.filter(en => en.eventId === event.id);
       
+      // Pisahkan yang memiliki seed time dengan yang tidak (99:99.99 atau NT)
       const noTimeEntries = eventEntries.filter(en => !en.seedTime || en.seedTime === '99:99.99' || en.seedTime.toLowerCase() === 'nt');
       const seededEntries = eventEntries.filter(en => en.seedTime && en.seedTime !== '99:99.99' && en.seedTime.toLowerCase() !== 'nt');
 
+      // Acak urutan (shuffle) perenang yang tidak memiliki seed time
       for (let i = noTimeEntries.length - 1; i > 0; i--) {
           const j = Math.floor(Math.random() * (i + 1));
           [noTimeEntries[i], noTimeEntries[j]] = [noTimeEntries[j], noTimeEntries[i]];
       }
 
-      seededEntries.sort((a, b) => a.seedTime.localeCompare(b.seedTime));
+      // Urutkan perenang yang memiliki seed time dari tercepat (waktu terkecil) ke terlambat
+      seededEntries.sort((a, b) => timeToSeconds(a.seedTime) - timeToSeconds(b.seedTime));
+
+      // Gabungkan kembali
       eventEntries = [...seededEntries, ...noTimeEntries];
 
       const totalSwimmers = eventEntries.length;
@@ -497,11 +502,12 @@ const App = () => {
       return;
     }
 
+    // Pisahkan Perenang Reguler dan Sparring/Exhibition
     const validRegular = eventEntriesAll.filter(en => en.resultTime && !en.status && !en.isSparring);
     const validSparring = eventEntriesAll.filter(en => en.resultTime && !en.status && en.isSparring);
 
-    validRegular.sort((a, b) => a.resultTime.localeCompare(b.resultTime));
-    validSparring.sort((a, b) => a.resultTime.localeCompare(b.resultTime));
+    validRegular.sort((a, b) => timeToSeconds(a.resultTime) - timeToSeconds(b.resultTime));
+    validSparring.sort((a, b) => timeToSeconds(a.resultTime) - timeToSeconds(b.resultTime));
 
     const updatedEntries = entries.map(en => {
       if (en.eventId === eventId) {
@@ -509,8 +515,9 @@ const App = () => {
           return { ...en, standardPoints: 0, alternativePoints: 0, pl: '-', hpl: '-' };
         }
         
+        // HPL (Heat Placement) tetap dihitung gabungan dalam 1 heat
         const heatEntries = eventEntriesAll.filter(heatEn => heatEn.heat === en.heat && heatEn.resultTime && !heatEn.status);
-        heatEntries.sort((a,b) => a.resultTime.localeCompare(b.resultTime));
+        heatEntries.sort((a,b) => timeToSeconds(a.resultTime) - timeToSeconds(b.resultTime));
         const heatRank = heatEntries.findIndex(sorted => sorted.id === en.id) + 1;
 
         if (en.isSparring) {
@@ -796,7 +803,7 @@ const App = () => {
           events.forEach((ev, eIdx) => {
             let evEntries = entries.filter(en => en.eventId === ev.id);
             if (evEntries.length === 0) return;
-            evEntries.sort((a, b) => a.seedTime.localeCompare(b.seedTime));
+            evEntries.sort((a, b) => timeToSeconds(a.seedTime) - timeToSeconds(b.seedTime));
 
             aoa.push([`Event ${eIdx + 1} - ${ev.name}`]);
             aoa.push(['Rank', 'Name/Team', 'Age', 'Team', 'Seed Time']);
@@ -870,7 +877,7 @@ const App = () => {
         XLSX.writeFile(wb, `${mode === 'overall' ? 'Psych_Sheet' : 'Entry_List_Per_Tim'}_${meetInfo.name.replace(/\s+/g, '_')}.xlsx`);
         showDialog("Sukses", `Excel berhasil dibuat!`, "success");
 
-      } else {
+        // PDF Export
         const jsPDF = await loadJsPDF();
         const doc = new jsPDF();
         let finalY = 20;
@@ -889,7 +896,7 @@ const App = () => {
             if (evEntries.length === 0) return;
             hasData = true;
 
-            evEntries.sort((a, b) => a.seedTime.localeCompare(b.seedTime));
+            evEntries.sort((a, b) => timeToSeconds(a.seedTime) - timeToSeconds(b.seedTime));
 
             if (finalY > 260) { doc.addPage(); finalY = 20; }
 
@@ -1012,16 +1019,20 @@ const App = () => {
     const modeSuffix = includePoints ? 'Scores' : 'Results';
     const eventNameFull = `Event ${eIdx + 1} - ${activeEvent.distance}m Gaya ${activeEvent.stroke} ${activeEvent.gender} ${activeEvent.category} ${activeEvent.type === 'Estafet' ? '(ESTAFET)' : ''}`;
 
+    // Sorting Khusus: Reguler (1,2,3) -> Sparring ('X') -> Status (DQ, NT)
     const sortedEntries = [...eventEntries].sort((a, b) => {
+      // 1. Status selalu di paling bawah
       if (a.status && !b.status) return 1;
       if (!a.status && b.status) return -1;
       
+      // 2. Sparring ('X') berada di bawah Reguler tapi di atas Status
       const aIsSparring = a.isSparring || a.pl === 'X';
       const bIsSparring = b.isSparring || b.pl === 'X';
       if (!aIsSparring && bIsSparring) return -1;
       if (aIsSparring && !bIsSparring) return 1;
 
-      if (a.resultTime && b.resultTime) return a.resultTime.localeCompare(b.resultTime);
+      // 3. Jika sama-sama reguler / sama-sama sparring, urutkan berdasarkan waktu
+      if (a.resultTime && b.resultTime) return timeToSeconds(a.resultTime) - timeToSeconds(b.resultTime);
       return 0;
     });
 
@@ -1150,7 +1161,7 @@ const App = () => {
           if (!aIsSparring && bIsSparring) return -1;
           if (aIsSparring && !bIsSparring) return 1;
 
-          if (a.resultTime && b.resultTime) return a.resultTime.localeCompare(b.resultTime);
+          if (a.resultTime && b.resultTime) return timeToSeconds(a.resultTime) - timeToSeconds(b.resultTime);
           return 0;
         });
 
@@ -2669,33 +2680,57 @@ const App = () => {
           <div className="px-4 flex justify-between items-end">
               <div>
                 <h3 className="text-2xl font-black uppercase tracking-tighter text-slate-800 flex items-center gap-2"><Crown className="text-emerald-500"/> Kandidat Perenang Terbaik</h3>
-                <p className="text-slate-500 text-sm font-medium mt-1">Dihitung otomatis berdasarkan perolehan Emas, Perak, Perunggu, dan Poin.</p>
+                <p className="text-slate-500 text-sm font-medium mt-1">Klasemen individu berdasarkan perolehan Emas, Perak, Perunggu, dan Poin per Kategori.</p>
               </div>
+              <button onClick={() => {
+                const data = [];
+                Object.entries(bestSwimmersData).sort((a,b) => a[0].localeCompare(b[0])).forEach(([groupKey, swimmersList]) => {
+                  swimmersList.filter(s => s.points > 0 || s.gold > 0 || s.silver > 0 || s.bronze > 0).forEach((s, i) => {
+                    data.push({ Kategori: groupKey, Peringkat: i+1, Nama: s.name, Tim: s.org, Emas: s.gold, Perak: s.silver, Perunggu: s.bronze, Poin: s.points });
+                  });
+                });
+                exportToXLSX(data, 'Kandidat_Perenang_Terbaik', 'Perenang Terbaik');
+              }} className="text-[10px] bg-slate-900 text-white px-4 py-2 rounded-lg font-black uppercase tracking-widest shadow-lg hover:bg-black active:scale-95 transition flex items-center gap-2">Export Excel</button>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {Object.entries(bestSwimmersData).map(([groupKey, swimmersList]) => {
-                const topSwimmer = swimmersList[0];
-                if (!topSwimmer || topSwimmer.points === 0) return null;
+          <div className="space-y-6">
+              {Object.entries(bestSwimmersData).sort((a,b) => a[0].localeCompare(b[0])).map(([groupKey, swimmersList]) => {
+                const validSwimmers = swimmersList.filter(s => s.points > 0 || s.gold > 0 || s.silver > 0 || s.bronze > 0);
+                if (validSwimmers.length === 0) return null;
+                
                 return (
-                  <div key={groupKey} className="bg-white p-8 rounded-[2rem] border border-slate-200 shadow-xl relative overflow-hidden group">
-                    <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-50 rounded-bl-full -z-10 group-hover:scale-110 transition-transform"></div>
-                    <span className="bg-emerald-100 text-emerald-800 px-4 py-1.5 rounded-xl text-xs font-black uppercase tracking-widest border border-emerald-200">{groupKey}</span>
-                    <h4 className="text-2xl font-black text-slate-800 uppercase mt-4 tracking-tight leading-none">{topSwimmer.name}</h4>
-                    <p className="text-xs font-bold text-slate-500 uppercase mt-2">{topSwimmer.org} [{topSwimmer.abbr}]</p>
-                    
-                    <div className="mt-6 flex gap-4">
-                      <div className="bg-slate-50 px-4 py-3 rounded-2xl border border-slate-100 text-center flex-1">
-                        <div className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Medali</div>
-                        <div className="font-black text-slate-800 flex items-center justify-center gap-2">
-                          <span className="text-yellow-500">{topSwimmer.gold}</span>-
-                          <span className="text-slate-400">{topSwimmer.silver}</span>-
-                          <span className="text-orange-500">{topSwimmer.bronze}</span>
-                        </div>
-                      </div>
-                      <div className="bg-slate-50 px-4 py-3 rounded-2xl border border-slate-100 text-center flex-1">
-                        <div className="text-xs font-black text-slate-400 uppercase tracking-widest mb-1">Poin</div>
-                        <div className="font-black text-indigo-600 text-xl leading-none">{topSwimmer.points}</div>
-                      </div>
+                  <div key={groupKey} className="bg-white p-6 rounded-[2rem] border border-slate-200 shadow-xl relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-48 h-48 bg-emerald-50 rounded-bl-full -z-10 opacity-50"></div>
+                    <div className="flex items-center gap-3 mb-4 border-b border-slate-100 pb-4">
+                      <span className="bg-emerald-100 text-emerald-800 px-4 py-1.5 rounded-xl text-xs font-black uppercase tracking-widest border border-emerald-200">{groupKey}</span>
+                      <h4 className="text-lg font-black text-slate-800 uppercase tracking-tight">Klasemen Individu</h4>
+                    </div>
+                    <div className="overflow-x-auto relative z-10">
+                      <table className="w-full text-left whitespace-nowrap">
+                        <thead className="bg-slate-50 text-[10px] font-black text-slate-400 uppercase">
+                          <tr>
+                            <th className="p-3 text-center w-12 rounded-l-xl">Pos</th>
+                            <th className="p-3">Nama Atlet</th>
+                            <th className="p-3">Tim/Klub</th>
+                            <th className="p-3 text-center text-yellow-600">Emas</th>
+                            <th className="p-3 text-center text-slate-500">Perak</th>
+                            <th className="p-3 text-center text-orange-600">Perunggu</th>
+                            <th className="p-3 text-center text-indigo-600 rounded-r-xl">Poin</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-50">
+                          {validSwimmers.map((swimmer, idx) => (
+                            <tr key={swimmer.id} className="hover:bg-slate-50 transition text-sm">
+                              <td className="p-3 text-center font-black text-slate-400">{idx + 1}</td>
+                              <td className="p-3 font-black text-slate-800 uppercase">{swimmer.name}</td>
+                              <td className="p-3 font-bold text-slate-500 uppercase text-xs">{swimmer.org} <span className="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">[{swimmer.abbr}]</span></td>
+                              <td className="p-3 text-center font-black text-yellow-600 text-base">{swimmer.gold > 0 ? swimmer.gold : '-'}</td>
+                              <td className="p-3 text-center font-black text-slate-500 text-base">{swimmer.silver > 0 ? swimmer.silver : '-'}</td>
+                              <td className="p-3 text-center font-black text-orange-600 text-base">{swimmer.bronze > 0 ? swimmer.bronze : '-'}</td>
+                              <td className="p-3 text-center font-black text-indigo-700 text-lg">{swimmer.points}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
                   </div>
                 )
